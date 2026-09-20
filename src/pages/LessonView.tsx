@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -15,9 +15,12 @@ import {
   CURRICULUM_LESSONS,
   loadStudentProgress,
   saveStudentProgress,
-  StudentProgress
+  StudentProgress,
+  CHECK_QUESTION_CORRECT_XP
 } from '../lib/learningStore';
 import { formatFractionOrDec } from '../lib/matrixEngine';
+import { shuffleOptions } from '../lib/shuffleOptions';
+import { getStudentId } from '../lib/classroomSync';
 import {
   SystemDisplay,
   MatrixEquationDisplay,
@@ -42,6 +45,24 @@ export default function LessonView() {
     setCompletedThisSession(false);
   }, [lessonId]);
 
+  // Shuffle each check-question's options once per (student, question) pair — most of the
+  // curriculum's check-questions had the correct answer hardcoded at option index 0, letting
+  // students learn to pick the first button instead of the material. Seeding with the
+  // student's id keeps a given question's order stable for that student across visits, while
+  // still varying from one student to the next (see shuffleOptions.ts).
+  const checkQuestions = useMemo(() => {
+    if (!lesson) return [];
+    const studentId = getStudentId();
+    return lesson.checkQuestions.map((q, qIdx) => {
+      const { options, correctIndex } = shuffleOptions(
+        `${studentId}-lesson${lesson.id}-check${qIdx}`,
+        q.options,
+        q.correctIndex
+      );
+      return { ...q, options, correctIndex };
+    });
+  }, [lesson]);
+
   if (!lesson) {
     return (
       <div className="p-8 text-center">
@@ -64,6 +85,18 @@ export default function LessonView() {
 
   const handleCheckAnswer = (qIndex: number) => {
     setSubmitted((prev) => ({ ...prev, [qIndex]: true }));
+
+    const isCorrect = selectedAnswers[qIndex] === checkQuestions[qIndex]?.correctIndex;
+    const xpKey = `lesson${lesson?.id}-check${qIndex}`;
+    if (isCorrect && lesson && !progress.checkQuestionXpAwarded.includes(xpKey)) {
+      const updatedProgress: StudentProgress = {
+        ...progress,
+        xp: progress.xp + CHECK_QUESTION_CORRECT_XP,
+        checkQuestionXpAwarded: [...progress.checkQuestionXpAwarded, xpKey]
+      };
+      saveStudentProgress(updatedProgress);
+      setProgress(updatedProgress);
+    }
   };
 
   const handleResetQuestion = (qIndex: number) => {
@@ -84,8 +117,11 @@ export default function LessonView() {
     setSubmitted({});
   };
 
+  const allCheckQuestionsAttempted =
+    checkQuestions.length === 0 || checkQuestions.every((_, qIdx) => submitted[qIdx]);
+
   const handleFinishLesson = () => {
-    if (completedThisSession) return;
+    if (completedThisSession || !allCheckQuestionsAttempted) return;
 
     const newCompleted = Array.from(new Set([...progress.completedLessons, lesson.id]));
     const updatedProgress: StudentProgress = {
@@ -222,7 +258,7 @@ export default function LessonView() {
           )}
         </div>
 
-        {lesson.checkQuestions.map((q, qIdx) => {
+        {checkQuestions.map((q, qIdx) => {
           const selectedOption = selectedAnswers[qIdx];
           const isSubmitted = submitted[qIdx];
           const isCorrect = selectedOption === q.correctIndex;
@@ -319,14 +355,17 @@ export default function LessonView() {
         <div>
           <h4 className="text-base font-bold">สำเร็จบทเรียนที่ {lesson.id}?</h4>
           <p className="text-xs text-slate-400 mt-0.5">
-            สะสม +50 XP และบันทึกความก้าวหน้าลงในโปรไฟล์ของคุณ
+            {!completedThisSession && !progress.completedLessons.includes(lesson.id) && !allCheckQuestionsAttempted
+              ? `ตอบคำถามเช็กความเข้าใจให้ครบ ${checkQuestions.length} ข้อก่อนบันทึกการเรียนจบบทเรียน`
+              : 'สะสม +50 XP และบันทึกความก้าวหน้าลงในโปรไฟล์ของคุณ'}
           </p>
         </div>
         <div className="flex items-center gap-3 w-full sm:w-auto">
           {!completedThisSession && !progress.completedLessons.includes(lesson.id) ? (
             <button
               onClick={handleFinishLesson}
-              className="w-full sm:w-auto px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
+              disabled={!allCheckQuestionsAttempted}
+              className="w-full sm:w-auto px-6 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-500 text-slate-950 font-black text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
             >
               <CheckCircle2 className="w-4 h-4" /> บันทึกการเรียนจบบทเรียน (+50 XP)
             </button>

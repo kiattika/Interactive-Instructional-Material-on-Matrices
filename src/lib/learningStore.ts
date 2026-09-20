@@ -44,7 +44,24 @@ export interface StudentProgress {
     timestamp: string;
   }[];
   earnedBadges: string[];
+  // Keys of the form "lesson{id}-check{qIdx}" for check-questions that have already earned
+  // their small per-question XP bonus (see CHECK_QUESTION_CORRECT_XP below). Without this, a
+  // student could reset and re-answer the same check-question — or just revisit a completed
+  // lesson — to farm XP indefinitely.
+  checkQuestionXpAwarded: string[];
 }
+
+// A check-question is a much smaller unit of effort than finishing a whole lesson (+50 XP,
+// LessonView.tsx) or a live in-class poll question (LIVE_POLL_CORRECT_XP = 10,
+// livePollStore.ts) — it's just confirming understanding of one fact while reading. Kept
+// smaller than both so the XP scale still reflects relative effort/stakes.
+export const CHECK_QUESTION_CORRECT_XP = 5;
+
+// Completing a full Pre-Test or Post-Test (10 questions, requires actually knowing/recalling
+// material across the whole course) is a bigger one-time effort than a single check-question
+// but smaller than the accumulated XP from studying and completing several lessons — so it
+// sits between the two on the same scale.
+export const DIAGNOSTIC_TEST_XP = 25;
 
 export interface TeacherSettings {
   masteryThreshold: number; // default 70
@@ -703,7 +720,8 @@ export const defaultStudentProgress: StudentProgress = {
     solutionTypes: 0
   },
   errorLog: [],
-  earnedBadges: []
+  earnedBadges: [],
+  checkQuestionXpAwarded: []
 };
 
 export const defaultTeacherSettings: TeacherSettings = {
