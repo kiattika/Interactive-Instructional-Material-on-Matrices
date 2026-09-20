@@ -122,7 +122,7 @@ async function startServer() {
 ${SOCRATIC_GROUND_RULES}`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: 'gemini-3.8-flash',
         contents: [
           { role: 'user', parts: [{ text: userMessage }] }
         ],
@@ -184,7 +184,7 @@ ${SOCRATIC_GROUND_RULES}
 ห้ามคำนวณหรือเฉลยคำตอบใดๆ ในข้อความนี้เด็ดขาด แม้จะเป็นเพียงตัวอย่างก็ตาม`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: 'gemini-3.8-flash',
         contents: [
           { role: 'user', parts: [{ text: `ช่วยแต่งโจทย์ฝึกใหม่เรื่อง ${TOPIC_LABELS[topic]} ให้หน่อยครับ` }] }
         ],

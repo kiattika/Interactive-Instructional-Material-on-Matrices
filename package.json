@@ -8,11 +8,9 @@
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit",
-    "emulators": "firebase emulators:start --only firestore --project demo-matrixmaster"
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@google-cloud/firestore": "^9.2.0",
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
     "@types/katex": "^0.16.8",
@@ -38,7 +36,6 @@
     "@types/qrcode": "^1.5.6",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
-    "firebase-tools": "^15.30.2",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
