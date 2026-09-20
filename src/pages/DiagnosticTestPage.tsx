@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   CheckCircle2,
   TrendingUp,
@@ -10,9 +10,16 @@ import {
   Loader2,
   Info
 } from 'lucide-react';
-import { loadStudentProgress, saveStudentProgress, loadTeacherSettings, StudentProgress } from '../lib/learningStore';
+import {
+  loadStudentProgress,
+  saveStudentProgress,
+  loadTeacherSettings,
+  StudentProgress,
+  DIAGNOSTIC_TEST_XP
+} from '../lib/learningStore';
 import { TopicKey, TOPIC_LABELS } from '../lib/topics';
 import { PRE_TEST_QUESTIONS, POST_TEST_QUESTIONS, TOPIC_ADVICE } from '../lib/diagnosticQuestions';
+import { shuffleOptions } from '../lib/shuffleOptions';
 import { RenderTextWithMath } from '../components/math/MathComponents';
 import { getClassroomLink, getStudentId } from '../lib/classroomSync';
 
@@ -25,10 +32,21 @@ interface DiagnosticTestPageProps {
 // in-page toggle) is what distinguishes the two now, so a student can't just flip a tab back to
 // re-read Pre-Test answers while sitting on the Post-Test.
 export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
-  const questions = mode === 'pre' ? PRE_TEST_QUESTIONS : POST_TEST_QUESTIONS;
+  const rawQuestions = mode === 'pre' ? PRE_TEST_QUESTIONS : POST_TEST_QUESTIONS;
   const modeLabel = mode === 'pre' ? 'Pre-Test' : 'Post-Test';
 
   const [progress, setProgress] = useState<StudentProgress>(loadStudentProgress);
+
+  // 18/20 questions across both banks had the correct answer hardcoded at option index 0 — see
+  // shuffleOptions.ts. Seeded by studentId+questionId so it's stable for this student but
+  // differs from student to student.
+  const questions = useMemo(() => {
+    const studentId = getStudentId();
+    return rawQuestions.map((q) => {
+      const { options, correctIndex } = shuffleOptions(`${studentId}-${q.id}`, q.options, q.correctIndex);
+      return { ...q, options, correctIndex };
+    });
+  }, [rawQuestions]);
   const [masteryThreshold] = useState(() => loadTeacherSettings().masteryThreshold);
   const [currentStep, setCurrentStep] = useState<'intro' | 'testing' | 'results'>('intro');
   const [userAnswers, setUserAnswers] = useState<Record<string, number>>({});
@@ -93,12 +111,16 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
       const finalPercent = Math.round((score / questions.length) * 100);
 
       const updatedProgress: StudentProgress = { ...progress };
+      // Award the one-time completion XP BEFORE flipping *TestCompleted to true, so retaking
+      // the test later (preTestCompleted/postTestCompleted already true) can't farm more XP.
       if (mode === 'pre') {
+        if (!updatedProgress.preTestCompleted) updatedProgress.xp += DIAGNOSTIC_TEST_XP;
         updatedProgress.preTestCompleted = true;
         updatedProgress.preTestScore = finalPercent;
         updatedProgress.preTestAnswers = userAnswers;
         updatedProgress.preTestDate = new Date().toISOString();
       } else {
+        if (!updatedProgress.postTestCompleted) updatedProgress.xp += DIAGNOSTIC_TEST_XP;
         updatedProgress.postTestCompleted = true;
         updatedProgress.postTestScore = finalPercent;
         updatedProgress.postTestAnswers = userAnswers;
@@ -165,7 +187,7 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
               onClick={handleStartTest}
               className="w-full mt-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition-colors"
             >
-              {isCompleted ? `ทำแบบทดสอบ ${modeLabel} อีกครั้ง` : `เริ่มทำ ${modeLabel}`}
+              {isCompleted ? `ทำแบบทดสอบ ${modeLabel} อีกครั้ง` : `เริ่มทำ ${modeLabel} (+${DIAGNOSTIC_TEST_XP} XP)`}
             </button>
           </div>
 

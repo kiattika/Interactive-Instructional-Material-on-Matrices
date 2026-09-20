@@ -2,17 +2,45 @@ import { useState, useEffect } from 'react';
 import { BarChart, Users, AlertTriangle, RefreshCw, Info, Link as LinkIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { loadTeacherSettings, TeacherSettings } from '../lib/learningStore';
-import { getTeacherClassCode } from '../lib/classroomSync';
-import type { StudentRecord } from '../lib/classroomStore';
+import type { StudentRecord, ClassSummary } from '../lib/classroomStore';
 import { StudentRosterRow } from '../components/StudentRosterRow';
 import { cn } from '../lib/utils';
 
 export default function TeacherAnalytics() {
   const [settings] = useState<TeacherSettings>(loadTeacherSettings);
-  const [classCode] = useState<string | null>(getTeacherClassCode);
+  // A teacher can have MULTIPLE classrooms (e.g. one per period) — this used to hardcode to
+  // just the single most-recently-created one via getTeacherClassCode(), so a teacher with
+  // more than one class could never see any but the first. Fetch the real list instead and let
+  // them switch.
+  const [allClasses, setAllClasses] = useState<ClassSummary[] | null>(null);
+  const [classesLoading, setClassesLoading] = useState(false);
+  const [classesError, setClassesError] = useState<string | null>(null);
+  const [classCode, setClassCode] = useState<string | null>(null);
   const [roster, setRoster] = useState<StudentRecord[] | null>(null);
   const [rosterLoading, setRosterLoading] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
+
+  async function refreshAllClasses() {
+    setClassesLoading(true);
+    setClassesError(null);
+    try {
+      const res = await fetch('/api/classroom');
+      const data = await res.json();
+      const classes = (data.classes as ClassSummary[]) || [];
+      setAllClasses(classes);
+      // listClasses() returns most-recently-created first — default to that one, but don't
+      // clobber a selection the teacher already made.
+      setClassCode((prev) => prev ?? classes[0]?.classCode ?? null);
+    } catch {
+      setClassesError('ไม่สามารถดึงรายชื่อห้องเรียนได้ ลองรีเฟรชอีกครั้ง');
+    } finally {
+      setClassesLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refreshAllClasses();
+  }, []);
 
   async function refreshRoster(code: string) {
     setRosterLoading(true);
@@ -37,6 +65,8 @@ export default function TeacherAnalytics() {
     if (classCode) refreshRoster(classCode);
   }, [classCode]);
 
+  const currentClass = allClasses?.find((c) => c.classCode === classCode) || null;
+
   return (
     <div className="space-y-6 pb-12">
       {/* Top Banner */}
@@ -52,6 +82,31 @@ export default function TeacherAnalytics() {
           รายชื่อ คะแนน และระดับความเชี่ยวชาญของนักเรียนที่เข้าร่วมห้องเรียนด้วยรหัสห้อง
         </p>
       </div>
+
+      {/* Classroom Selector — a teacher can have multiple classrooms (e.g. one per period) */}
+      {allClasses && allClasses.length > 1 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-wrap items-center gap-3">
+          <span className="text-xs font-bold text-slate-500 flex-shrink-0">เลือกห้องเรียน:</span>
+          <div className="flex flex-wrap gap-2">
+            {allClasses.map((cls) => (
+              <button
+                key={cls.classCode}
+                onClick={() => setClassCode(cls.classCode)}
+                className={cn(
+                  'px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors',
+                  classCode === cls.classCode
+                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                    : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'
+                )}
+              >
+                {cls.classCode}
+                {cls.note ? ` — ${cls.note}` : ''} ({cls.studentCount} คน)
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {classesError && <p className="text-xs font-bold text-rose-600">{classesError}</p>}
 
       {/* Class Overview Stats — settings-derived + a real roster count once a class exists */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -82,6 +137,12 @@ export default function TeacherAnalytics() {
         <div className="flex items-center justify-between flex-wrap gap-3">
           <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
             <Users className="w-5 h-5 text-indigo-600" /> รายชื่อและความก้าวหน้านักเรียน
+            {currentClass && (
+              <span className="text-xs font-bold text-indigo-500">
+                — {currentClass.classCode}
+                {currentClass.note ? ` (${currentClass.note})` : ''}
+              </span>
+            )}
           </h3>
           {classCode && (
             <button
@@ -94,14 +155,16 @@ export default function TeacherAnalytics() {
           )}
         </div>
 
-        {!classCode ? (
+        {classesLoading && !allClasses ? (
+          <p className="text-xs text-slate-400 font-medium">กำลังโหลดรายชื่อห้องเรียน...</p>
+        ) : !classCode ? (
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-500 flex items-center justify-center flex-shrink-0">
               <Info className="w-5 h-5" />
             </div>
             <div className="space-y-2">
               <p className="text-xs text-slate-500 leading-relaxed">
-                ยังไม่ได้สร้างรหัสห้องเรียนบนเครื่องนี้ — ไปสร้างรหัสห้องเรียนที่หน้าตั้งค่าก่อน แล้วบอกนักเรียน
+                ยังไม่มีห้องเรียนใดถูกสร้างเลย — ไปสร้างรหัสห้องเรียนที่หน้าตั้งค่าก่อน แล้วบอกนักเรียน
                 ให้พิมพ์รหัสนี้ตอนเข้าเรียนครั้งแรก (ไม่ต้อง login) รายชื่อจริงจะมาปรากฏที่นี่
               </p>
               <Link
@@ -137,20 +200,6 @@ export default function TeacherAnalytics() {
             )}
           </>
         )}
-      </div>
-
-      {/* Common Conceptual Errors — general reference notes from teaching experience /
-          matrix-education literature, NOT derived from this system's usage data. */}
-      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 shadow-sm space-y-3">
-        <div className="flex items-center gap-2 text-amber-900 font-extrabold text-sm">
-          <AlertTriangle className="w-5 h-5 text-amber-600" />
-          <span>ข้อผิดพลาดเชิงมโนทัศน์ที่พบบ่อยโดยทั่วไป (ข้อมูลอ้างอิงทั่วไป ยังไม่ใช่สถิติจากนักเรียนจริง)</span>
-        </div>
-        <ul className="text-xs text-amber-950 space-y-2 list-disc list-inside leading-relaxed font-medium">
-          <li><strong>Determinant 3x3:</strong> นักเรียนมักสับสนเครื่องหมายบวกลบเมื่อคูณทแยงลงและทแยงขึ้น</li>
-          <li><strong>Cramer's Rule:</strong> มีแนวโน้มแทนที่คอลัมน์ B ผิดตำแหน่งตัวแปรในเมทริกซ์ Ay และ Az</li>
-          <li><strong>Row Operations (ERO):</strong> มักนำเลข 0 ไปคูณทั้งแถว ซึ่งเป็นการดำเนินการที่ไม่อนุญาต</li>
-        </ul>
       </div>
     </div>
   );

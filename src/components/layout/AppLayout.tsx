@@ -187,20 +187,33 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        {/* Profile Info */}
-        <div className="flex items-center gap-3 sm:gap-4">
-          <div className="flex flex-col items-end hidden md:flex">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              {progress.studentName}
-            </span>
-            <span className="text-xs font-extrabold text-indigo-600">
-              {progress.xp} XP • {progress.earnedBadges.length} Badges
-            </span>
+        {/* Profile Info — student identity/stats only make sense in Student Mode. Teacher Mode
+            shows a role badge instead, never a specific student's XP/name. */}
+        {effectiveMode === 'student' ? (
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="flex flex-col items-end hidden md:flex">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                {progress.studentName}
+              </span>
+              <span className="text-xs font-extrabold text-indigo-600">
+                {progress.xp} XP • {progress.earnedBadges.length} Badges
+              </span>
+            </div>
+            <div className="w-8 h-8 sm:w-9 sm:h-9 bg-indigo-100 text-indigo-700 rounded-full border-2 border-indigo-200 flex items-center justify-center font-black text-xs">
+              {progress.studentName.slice(0, 2)}
+            </div>
           </div>
-          <div className="w-8 h-8 sm:w-9 sm:h-9 bg-indigo-100 text-indigo-700 rounded-full border-2 border-indigo-200 flex items-center justify-center font-black text-xs">
-            {progress.studentName.slice(0, 2)}
+        ) : (
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="flex flex-col items-end hidden md:flex">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">โหมดครูผู้สอน</span>
+              <span className="text-xs font-extrabold text-slate-700">Teacher Mode</span>
+            </div>
+            <div className="w-8 h-8 sm:w-9 sm:h-9 bg-slate-900 text-amber-400 rounded-full border-2 border-slate-700 flex items-center justify-center font-black text-xs">
+              <Tv2 className="w-4 h-4" />
+            </div>
           </div>
-        </div>
+        )}
       </header>
 
       <main className="flex-grow flex overflow-hidden relative">
@@ -275,13 +288,18 @@ export function AppLayout({ children }: { children: ReactNode }) {
               );
             })}
 
-            <button
-              onClick={() => setShowJoinModal(true)}
-              className="mt-auto p-3 bg-white border border-slate-200 rounded-xl text-[11px] font-bold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 transition-colors flex items-center gap-2 flex-shrink-0"
-            >
-              <Users className="w-3.5 h-3.5" />
-              {classroomLink ? `ห้องเรียน: ${classroomLink.classCode}` : 'เข้าร่วมห้องเรียน'}
-            </button>
+            {/* This shows the STUDENT's own joined-classroom record — meaningless (and
+                confusing) while acting as the teacher, so it's hidden entirely in Teacher Mode
+                rather than relabeled. */}
+            {effectiveMode === 'student' && (
+              <button
+                onClick={() => setShowJoinModal(true)}
+                className="mt-auto p-3 bg-white border border-slate-200 rounded-xl text-[11px] font-bold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 transition-colors flex items-center gap-2 flex-shrink-0"
+              >
+                <Users className="w-3.5 h-3.5" />
+                {classroomLink ? `ห้องเรียน: ${classroomLink.classCode}` : 'เข้าร่วมห้องเรียน'}
+              </button>
+            )}
 
             <div className="p-3.5 bg-gradient-to-br from-indigo-900 to-slate-900 rounded-xl text-white space-y-2 flex-shrink-0">
               <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">

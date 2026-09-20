@@ -17,7 +17,8 @@ import {
   Pencil,
   Check,
   X,
-  QrCode
+  QrCode,
+  AlertTriangle
 } from 'lucide-react';
 import { loadTeacherSettings, saveTeacherSettings, TeacherSettings } from '../lib/learningStore';
 import { getTeacherClassCode, setTeacherClassCode, clearTeacherClassCode } from '../lib/classroomSync';
@@ -504,6 +505,21 @@ export default function TeacherSettingsPage() {
             );
           })}
         </div>
+      </div>
+
+      {/* Common Conceptual Errors — general reference notes from teaching experience /
+          matrix-education literature, NOT derived from this system's usage data. Moved here
+          from the Analytics page, where it sat oddly next to real per-student statistics. */}
+      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 shadow-sm space-y-3">
+        <div className="flex items-center gap-2 text-amber-900 font-extrabold text-sm">
+          <AlertTriangle className="w-5 h-5 text-amber-600" />
+          <span>ข้อผิดพลาดเชิงมโนทัศน์ที่พบบ่อยโดยทั่วไป (ข้อมูลอ้างอิงทั่วไป ยังไม่ใช่สถิติจากนักเรียนจริง)</span>
+        </div>
+        <ul className="text-xs text-amber-950 space-y-2 list-disc list-inside leading-relaxed font-medium">
+          <li><strong>Determinant 3x3:</strong> นักเรียนมักสับสนเครื่องหมายบวกลบเมื่อคูณทแยงลงและทแยงขึ้น</li>
+          <li><strong>Cramer's Rule:</strong> มีแนวโน้มแทนที่คอลัมน์ B ผิดตำแหน่งตัวแปรในเมทริกซ์ Ay และ Az</li>
+          <li><strong>Row Operations (ERO):</strong> มักนำเลข 0 ไปคูณทั้งแถว ซึ่งเป็นการดำเนินการที่ไม่อนุญาต</li>
+        </ul>
       </div>
 
       {qrModalCode && <QRCodeModal classCode={qrModalCode} onClose={() => setQrModalCode(null)} />}

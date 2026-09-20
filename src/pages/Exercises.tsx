@@ -1,6 +1,14 @@
 import { useState, useMemo } from 'react';
 import { generateExercises, solveLinearSystem, formatFractionOrDec } from '../lib/matrixEngine';
 import { ENGINEERING_ICT_PROBLEMS } from '../lib/engineeringProblems';
+import {
+  loadStudentProgress,
+  saveStudentProgress,
+  StudentProgress,
+  CHECK_QUESTION_CORRECT_XP
+} from '../lib/learningStore';
+import { shuffleOptionsByValue } from '../lib/shuffleOptions';
+import { getStudentId } from '../lib/classroomSync';
 import { ExerciseQuestion, ApplicationField } from '../types';
 import { CheckCircle2, XCircle, HelpCircle, Trophy, Sparkles, RefreshCw, Award, Cpu, Cog, Eye, Lightbulb } from 'lucide-react';
 import { RenderTextWithMath } from '../components/math/MathComponents';
@@ -8,13 +16,31 @@ import { RenderTextWithMath } from '../components/math/MathComponents';
 export default function Exercises() {
   const [tab, setTab] = useState<'mcq' | 'applied'>('mcq');
   const [appliedFilter, setAppliedFilter] = useState<ApplicationField | 'all'>('all');
-  const [revealedApplied, setRevealedApplied] = useState<Record<string, boolean>>({});
-  const [questions, setQuestions] = useState<ExerciseQuestion[]>(generateExercises);
+  // 0 = nothing revealed, 1 = +method rationale, 2 = +numeric answer, 3 = +interpretation —
+  // revealing all three at once let students skip straight to the final answer without ever
+  // engaging with the recommended method or its real-world interpretation.
+  const [revealStep, setRevealStep] = useState<Record<string, number>>({});
+  const [rawQuestions, setRawQuestions] = useState<ExerciseQuestion[]>(generateExercises);
   const [activeFilter, setActiveFilter] = useState<'All' | 'Easy' | 'Medium' | 'Hard'>('All');
   const [userAnswers, setUserAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState<Record<string, boolean>>({});
   const [hintsVisible, setHintsVisible] = useState<Record<string, number>>({});
-  const [score, setScore] = useState<number>(1250);
+  const [progress, setProgress] = useState<StudentProgress>(loadStudentProgress);
+  // Tracks which questions actually granted fresh XP on submit, so the feedback message
+  // doesn't claim "+XP" again for a question already awarded in an earlier visit.
+  const [xpGranted, setXpGranted] = useState<Record<string, boolean>>({});
+
+  // 4/5 of the hardcoded exercises had their correct answer at options[0] — see
+  // shuffleOptions.ts. Seeded by studentId+questionId, so it's stable for this student but
+  // varies across students.
+  const questions = useMemo(() => {
+    const studentId = getStudentId();
+    return rawQuestions.map((q) => {
+      if (!q.options) return q;
+      const { options } = shuffleOptionsByValue(`${studentId}-${q.id}`, q.options, q.correctAnswer as string);
+      return { ...q, options };
+    });
+  }, [rawQuestions]);
 
   const filteredQuestions = useMemo(() => {
     if (activeFilter === 'All') return questions;
@@ -26,8 +52,12 @@ export default function Exercises() {
     return ENGINEERING_ICT_PROBLEMS.filter((p) => p.field === appliedFilter);
   }, [appliedFilter]);
 
-  const handleToggleReveal = (id: string) => {
-    setRevealedApplied((prev) => ({ ...prev, [id]: !prev[id] }));
+  const handleAdvanceReveal = (id: string) => {
+    setRevealStep((prev) => ({ ...prev, [id]: Math.min((prev[id] || 0) + 1, 3) }));
+  };
+
+  const handleCollapseReveal = (id: string) => {
+    setRevealStep((prev) => ({ ...prev, [id]: 0 }));
   };
 
   const handleSelectAnswer = (qId: string, answer: string) => {
@@ -40,8 +70,16 @@ export default function Exercises() {
     setSubmitted((prev) => ({ ...prev, [qId]: true }));
 
     const q = questions.find((item) => item.id === qId);
-    if (q && userAnswers[qId] === q.correctAnswer) {
-      setScore((prev) => prev + 25);
+    const xpKey = `mcq-${qId}`;
+    if (q && userAnswers[qId] === q.correctAnswer && !progress.checkQuestionXpAwarded.includes(xpKey)) {
+      const updatedProgress: StudentProgress = {
+        ...progress,
+        xp: progress.xp + CHECK_QUESTION_CORRECT_XP,
+        checkQuestionXpAwarded: [...progress.checkQuestionXpAwarded, xpKey]
+      };
+      saveStudentProgress(updatedProgress);
+      setProgress(updatedProgress);
+      setXpGranted((prev) => ({ ...prev, [qId]: true }));
     }
   };
 
@@ -53,7 +91,7 @@ export default function Exercises() {
   };
 
   const handleRefreshQuestions = () => {
-    setQuestions(generateExercises());
+    setRawQuestions(generateExercises());
     setUserAnswers({});
     setSubmitted({});
     setHintsVisible({});
@@ -76,7 +114,7 @@ export default function Exercises() {
           </div>
           <div>
             <p className="text-[10px] uppercase font-bold text-indigo-400">Total XP Score</p>
-            <p className="text-xl font-black text-indigo-900">{score} XP</p>
+            <p className="text-xl font-black text-indigo-900">{progress.xp} XP</p>
           </div>
         </div>
       </div>
@@ -225,7 +263,7 @@ export default function Exercises() {
                       {isCorrect ? (
                         <>
                           <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                          คำตอบถูกต้อง! คุณได้รับ +25 XP
+                          คำตอบถูกต้อง!{xpGranted[q.id] ? ` คุณได้รับ +${CHECK_QUESTION_CORRECT_XP} XP` : ''}
                         </>
                       ) : (
                         <>
@@ -267,7 +305,7 @@ export default function Exercises() {
 
         <div className="space-y-4">
           {filteredApplied.map((problem) => {
-            const revealed = revealedApplied[problem.id];
+            const revealed = revealStep[problem.id] || 0;
             const summary = solveLinearSystem(problem.system);
             return (
               <div key={problem.id} className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
@@ -310,14 +348,29 @@ export default function Exercises() {
                   ))}
                 </div>
 
-                <button
-                  onClick={() => handleToggleReveal(problem.id)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
-                >
-                  <Eye className="w-3.5 h-3.5" /> {revealed ? 'ซ่อนแนวทางและคำตอบ' : 'ดูแนวทางและคำตอบ'}
-                </button>
+                <div className="flex items-center gap-3">
+                  {revealed < 3 && (
+                    <button
+                      onClick={() => handleAdvanceReveal(problem.id)}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+                    >
+                      <Eye className="w-3.5 h-3.5" />{' '}
+                      {revealed === 0 && 'ดูขั้นตอนที่ 1: แนวทางที่แนะนำ'}
+                      {revealed === 1 && 'ดูขั้นตอนที่ 2: คำตอบ'}
+                      {revealed === 2 && 'ดูขั้นตอนที่ 3: การตีความผล'}
+                    </button>
+                  )}
+                  {revealed > 0 && (
+                    <button
+                      onClick={() => handleCollapseReveal(problem.id)}
+                      className="text-xs font-bold text-slate-400 hover:text-slate-600 underline"
+                    >
+                      ซ่อนแนวทางและคำตอบทั้งหมด
+                    </button>
+                  )}
+                </div>
 
-                {revealed && (
+                {revealed >= 1 && (
                   <div className="space-y-3 pt-2 border-t border-slate-100">
                     <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-200 text-xs">
                       <p className="font-bold text-indigo-900 mb-1 flex items-center gap-1.5">
@@ -329,24 +382,32 @@ export default function Exercises() {
                       <p className="text-indigo-900">{problem.methodRationale}</p>
                     </div>
 
-                    {summary.type === 'unique' && summary.solution && (
-                      <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs">
-                        <p className="font-bold text-emerald-900 mb-1">คำตอบ:</p>
-                        <p className="font-mono text-emerald-900">
-                          {problem.system.variables
-                            .map(
-                              (v, i) =>
-                                `${v} = ${formatFractionOrDec(summary.solution![i])} (${problem.variableMeaning[i]})`
-                            )
-                            .join(' , ')}
-                        </p>
+                    {revealed >= 2 &&
+                      (summary.type === 'unique' && summary.solution ? (
+                        <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs">
+                          <p className="font-bold text-emerald-900 mb-1">คำตอบ:</p>
+                          <p className="font-mono text-emerald-900">
+                            {problem.system.variables
+                              .map(
+                                (v, i) =>
+                                  `${v} = ${formatFractionOrDec(summary.solution![i])} (${problem.variableMeaning[i]})`
+                              )
+                              .join(' , ')}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600">
+                          ระบบสมการนี้ไม่มีคำตอบเชิงตัวเลขเดียว (
+                          {summary.type === 'no_solution' ? 'ไม่มีคำตอบ' : 'มีคำตอบนับไม่ถ้วน'})
+                        </div>
+                      ))}
+
+                    {revealed >= 3 && (
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700">
+                        <p className="font-bold text-slate-800 mb-1">การตีความคำตอบ (Polya ขั้น 4):</p>
+                        <p>{problem.interpretationNote}</p>
                       </div>
                     )}
-
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700">
-                      <p className="font-bold text-slate-800 mb-1">การตีความคำตอบ (Polya ขั้น 4):</p>
-                      <p>{problem.interpretationNote}</p>
-                    </div>
                   </div>
                 )}
               </div>
