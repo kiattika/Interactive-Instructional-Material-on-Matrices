@@ -1,0 +1,6 @@
+{
+  "name": "Interactive Matrix Solver",
+  "description": "Virtual Mathematics Laboratory for solving linear equations using matrices.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

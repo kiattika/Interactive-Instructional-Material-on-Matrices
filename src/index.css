@@ -1,0 +1,9 @@
+@import "tailwindcss";
+@import "katex/dist/katex.min.css";
+
+/* Increase matrix and array row spacing for clear fraction readability */
+.katex .mtable .vlist-t {
+  margin-top: 0.15em;
+  margin-bottom: 0.15em;
+}
+
