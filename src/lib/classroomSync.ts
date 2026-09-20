@@ -6,7 +6,6 @@ import type { SyncedProgress } from './classroomStore';
 
 const STUDENT_ID_KEY = 'matrix_master_student_id_v1';
 const CLASSROOM_LINK_KEY = 'matrix_master_classroom_link_v1';
-const ONBOARDING_SEEN_KEY = 'matrix_master_onboarding_seen_v1';
 const TEACHER_CLASS_CODE_KEY = 'matrix_master_teacher_classcode_v1';
 
 export interface ClassroomLink {
@@ -55,22 +54,6 @@ export function setClassroomLink(classCode: string): void {
 export function clearClassroomLink(): void {
   try {
     localStorage.removeItem(CLASSROOM_LINK_KEY);
-  } catch {
-    // ignore
-  }
-}
-
-export function hasSeenOnboarding(): boolean {
-  try {
-    return localStorage.getItem(ONBOARDING_SEEN_KEY) === '1';
-  } catch {
-    return true; // fail closed: never re-nag if storage is unavailable
-  }
-}
-
-export function markOnboardingSeen(): void {
-  try {
-    localStorage.setItem(ONBOARDING_SEEN_KEY, '1');
   } catch {
     // ignore
   }

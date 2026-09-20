@@ -26,6 +26,7 @@ export interface StudentRecord {
 export interface ClassRecord {
   classCode: string;
   createdAt: string;
+  active: boolean;
   students: Record<string, StudentRecord>; // keyed by studentId
 }
 
@@ -58,6 +59,7 @@ export function createClass(db: ClassroomDB): { db: ClassroomDB; classCode: stri
   const record: ClassRecord = {
     classCode,
     createdAt: new Date().toISOString(),
+    active: true,
     students: {}
   };
   return {
@@ -70,7 +72,18 @@ export function classExists(db: ClassroomDB, classCode: string): boolean {
   return Object.prototype.hasOwnProperty.call(db.classes, classCode);
 }
 
-export type UpsertResult = { ok: true; db: ClassroomDB } | { ok: false; error: 'class_not_found' };
+// The single check every write/read path that "belongs" to students or the AI endpoints must
+// use: a class that was closed by the teacher must behave exactly like class_not_found
+// everywhere, not just block new joins. Teacher-only paths (roster, close/reopen, listing)
+// intentionally use classExists directly instead, since a teacher must still be able to see
+// and reopen a class they closed.
+export function isClassActive(db: ClassroomDB, classCode: string): boolean {
+  const cls = db.classes[classCode];
+  return !!cls && cls.active;
+}
+
+export type ClassMutationResult = { ok: true; db: ClassroomDB } | { ok: false; error: 'class_not_found' };
+export type UpsertResult = ClassMutationResult;
 
 export function upsertStudentProgress(
   db: ClassroomDB,
@@ -80,7 +93,7 @@ export function upsertStudentProgress(
   progress: SyncedProgress
 ): UpsertResult {
   const cls = db.classes[classCode];
-  if (!cls) return { ok: false, error: 'class_not_found' };
+  if (!cls || !cls.active) return { ok: false, error: 'class_not_found' };
 
   const record: StudentRecord = {
     studentId,
@@ -101,4 +114,37 @@ export function getRoster(db: ClassroomDB, classCode: string): StudentRecord[] |
   const cls = db.classes[classCode];
   if (!cls) return null;
   return Object.values(cls.students).sort((a, b) => a.displayName.localeCompare(b.displayName, 'th'));
+}
+
+function setActive(db: ClassroomDB, classCode: string, active: boolean): ClassMutationResult {
+  const cls = db.classes[classCode];
+  if (!cls) return { ok: false, error: 'class_not_found' };
+  const updatedClass: ClassRecord = { ...cls, active };
+  return { ok: true, db: { classes: { ...db.classes, [classCode]: updatedClass } } };
+}
+
+export function closeClass(db: ClassroomDB, classCode: string): ClassMutationResult {
+  return setActive(db, classCode, false);
+}
+
+export function reopenClass(db: ClassroomDB, classCode: string): ClassMutationResult {
+  return setActive(db, classCode, true);
+}
+
+export interface ClassSummary {
+  classCode: string;
+  createdAt: string;
+  active: boolean;
+  studentCount: number;
+}
+
+export function listClasses(db: ClassroomDB): ClassSummary[] {
+  return Object.values(db.classes)
+    .map((cls) => ({
+      classCode: cls.classCode,
+      createdAt: cls.createdAt,
+      active: cls.active,
+      studentCount: Object.keys(cls.students).length
+    }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }

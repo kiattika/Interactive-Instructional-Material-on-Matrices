@@ -7,10 +7,15 @@ import {
   ClassroomDB,
   StudentRecord,
   SyncedProgress,
+  ClassSummary,
   createEmptyDB,
   createClass as createClassPure,
   upsertStudentProgress as upsertPure,
-  getRoster as getRosterPure
+  getRoster as getRosterPure,
+  isClassActive,
+  closeClass as closeClassPure,
+  reopenClass as reopenClassPure,
+  listClasses as listClassesPure
 } from '../src/lib/classroomStore';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'classroom.json');
@@ -71,4 +76,37 @@ export function syncStudentProgress(
 export async function fetchRoster(classCode: string): Promise<StudentRecord[] | null> {
   const db = await readDB();
   return getRosterPure(db, classCode);
+}
+
+// Shared by every student- or AI-facing route (sync is covered inside syncStudentProgress
+// itself via the updated pure upsertStudentProgress) that must treat a closed class exactly
+// like a non-existent one — see classroomStore.ts's isClassActive doc comment.
+export async function isClassUsable(classCode: string): Promise<boolean> {
+  const db = await readDB();
+  return isClassActive(db, classCode);
+}
+
+export function closeClass(classCode: string): Promise<{ ok: true } | { ok: false; error: 'class_not_found' }> {
+  return withLock(async () => {
+    const db = await readDB();
+    const result = closeClassPure(db, classCode);
+    if (!result.ok) return result;
+    await writeDB(result.db);
+    return { ok: true };
+  });
+}
+
+export function reopenClass(classCode: string): Promise<{ ok: true } | { ok: false; error: 'class_not_found' }> {
+  return withLock(async () => {
+    const db = await readDB();
+    const result = reopenClassPure(db, classCode);
+    if (!result.ok) return result;
+    await writeDB(result.db);
+    return { ok: true };
+  });
+}
+
+export async function listClasses(): Promise<ClassSummary[]> {
+  const db = await readDB();
+  return listClassesPure(db);
 }

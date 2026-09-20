@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Sparkles, Send, Lightbulb, RefreshCw } from 'lucide-react';
 import { LinearSystem } from '../types';
 import { RenderTextWithMath } from './math/MathComponents';
+import { getClassroomLink, getStudentId } from '../lib/classroomSync';
 
 interface GeminiTutorProps {
   system: LinearSystem;
@@ -36,12 +37,27 @@ export function GeminiTutor({ system, activeMethod, detA, solutionType }: Gemini
     if (!textToSend) setInput('');
     setLoading(true);
 
+    const classroomLink = getClassroomLink();
+    if (!classroomLink) {
+      // Should not happen in practice — joining a classroom is mandatory before any of the
+      // app is reachable (see AppLayout.tsx) — but fail with a clear message rather than a
+      // silent 403 if this component is ever reached without one.
+      setMessages([
+        ...newMsgs,
+        { sender: 'ai', text: 'ต้องเข้าร่วมห้องเรียนด้วยรหัสห้องก่อนจึงจะใช้ครูพี่หนุ่ม AI ได้ครับ ลองรีเฟรชหน้านี้' },
+      ]);
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/ai-tutor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userMessage: query,
+          classCode: classroomLink.classCode,
+          studentId: getStudentId(),
           context: {
             dimension: system.dimension,
             A: system.A,
