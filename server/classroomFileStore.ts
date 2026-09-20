@@ -15,7 +15,9 @@ import {
   isClassActive,
   closeClass as closeClassPure,
   reopenClass as reopenClassPure,
-  listClasses as listClassesPure
+  listClasses as listClassesPure,
+  setClassNote as setClassNotePure,
+  removeStudent as removeStudentPure
 } from '../src/lib/classroomStore';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'classroom.json');
@@ -49,10 +51,10 @@ async function writeDB(db: ClassroomDB): Promise<void> {
   await fs.rename(tmpPath, DB_PATH);
 }
 
-export function createClass(): Promise<{ classCode: string }> {
+export function createClass(note?: string): Promise<{ classCode: string }> {
   return withLock(async () => {
     const db = await readDB();
-    const { db: nextDB, classCode } = createClassPure(db);
+    const { db: nextDB, classCode } = createClassPure(db, note);
     await writeDB(nextDB);
     return { classCode };
   });
@@ -109,4 +111,27 @@ export function reopenClass(classCode: string): Promise<{ ok: true } | { ok: fal
 export async function listClasses(): Promise<ClassSummary[]> {
   const db = await readDB();
   return listClassesPure(db);
+}
+
+export function setClassNote(classCode: string, note: string): Promise<{ ok: true } | { ok: false; error: 'class_not_found' }> {
+  return withLock(async () => {
+    const db = await readDB();
+    const result = setClassNotePure(db, classCode, note);
+    if (!result.ok) return result;
+    await writeDB(result.db);
+    return { ok: true };
+  });
+}
+
+export function removeStudent(
+  classCode: string,
+  studentId: string
+): Promise<{ ok: true } | { ok: false; error: 'class_not_found' }> {
+  return withLock(async () => {
+    const db = await readDB();
+    const result = removeStudentPure(db, classCode, studentId);
+    if (!result.ok) return result;
+    await writeDB(result.db);
+    return { ok: true };
+  });
 }

@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react';
-import { BarChart, Users, AlertTriangle, RefreshCw, Info, Wand2, Link as LinkIcon } from 'lucide-react';
+import { BarChart, Users, AlertTriangle, RefreshCw, Info, Link as LinkIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { loadTeacherSettings, TeacherSettings } from '../lib/learningStore';
 import { getTeacherClassCode } from '../lib/classroomSync';
-import { TOPIC_LABELS, TopicKey } from '../lib/topics';
 import type { StudentRecord } from '../lib/classroomStore';
-import { RenderTextWithMath } from '../components/math/MathComponents';
+import { StudentRosterRow } from '../components/StudentRosterRow';
 import { cn } from '../lib/utils';
 
 export default function TeacherAnalytics() {
@@ -14,9 +13,6 @@ export default function TeacherAnalytics() {
   const [roster, setRoster] = useState<StudentRecord[] | null>(null);
   const [rosterLoading, setRosterLoading] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
-  const [aiPanel, setAiPanel] = useState<{ studentId: string; topic: TopicKey } | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiText, setAiText] = useState('');
 
   async function refreshRoster(code: string) {
     setRosterLoading(true);
@@ -40,34 +36,6 @@ export default function TeacherAnalytics() {
   useEffect(() => {
     if (classCode) refreshRoster(classCode);
   }, [classCode]);
-
-  async function handleGenerateProblem(studentId: string, topic: TopicKey) {
-    setAiPanel({ studentId, topic });
-    setAiLoading(true);
-    setAiText('');
-
-    if (!classCode) {
-      // Not reachable through the UI (the button only renders once a roster loaded, which
-      // requires a classCode) but guard anyway rather than firing a request with no classCode.
-      setAiText('ไม่พบรหัสห้องเรียนที่ใช้งานอยู่');
-      setAiLoading(false);
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/ai-practice-problem', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, classCode, studentId })
-      });
-      const data = await res.json();
-      setAiText(data.problemText || 'ขออภัยครับ ไม่สามารถสร้างโจทย์ได้ในขณะนี้');
-    } catch {
-      setAiText('เกิดข้อผิดพลาดในการเชื่อมต่อ AI โปรดลองใหม่อีกครั้ง');
-    } finally {
-      setAiLoading(false);
-    }
-  }
 
   return (
     <div className="space-y-6 pb-12">
@@ -157,54 +125,14 @@ export default function TeacherAnalytics() {
 
             {roster && roster.length > 0 && (
               <div className="space-y-3">
-                {roster.map((s) => {
-                  const weakTopics = (Object.keys(TOPIC_LABELS) as TopicKey[]).filter(
-                    (k) => s.progress.topicMastery[k] < settings.masteryThreshold
-                  );
-                  return (
-                    <div key={s.studentId} className="border border-slate-200 rounded-xl p-4 space-y-2">
-                      <div className="flex items-center justify-between flex-wrap gap-2">
-                        <span className="font-bold text-slate-800 text-sm">{s.displayName}</span>
-                        <div className="flex items-center gap-3 text-[11px] font-bold text-slate-500 flex-wrap">
-                          <span>{s.progress.xp} XP</span>
-                          <span>{s.progress.completedLessons.length} บทเรียน</span>
-                          <span>Pre {s.progress.preTestCompleted ? `${s.progress.preTestScore}%` : '—'}</span>
-                          <span>Post {s.progress.postTestCompleted ? `${s.progress.postTestScore}%` : '—'}</span>
-                          <span>{s.progress.earnedBadges.length} Badges</span>
-                        </div>
-                      </div>
-                      <p className="text-[10px] text-slate-400">
-                        อัปเดตล่าสุด: {new Date(s.lastSyncedAt).toLocaleString('th-TH')}
-                      </p>
-
-                      {weakTopics.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 pt-1">
-                          {weakTopics.map((t) => (
-                            <button
-                              key={t}
-                              onClick={() => handleGenerateProblem(s.studentId, t)}
-                              disabled={aiLoading && aiPanel?.studentId === s.studentId && aiPanel.topic === t}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg text-[11px] font-bold hover:bg-amber-100 transition-colors disabled:opacity-60"
-                            >
-                              <Wand2 className="w-3 h-3" />
-                              {TOPIC_LABELS[t]} ({s.progress.topicMastery[t]}%)
-                            </button>
-                          ))}
-                        </div>
-                      )}
-
-                      {aiPanel?.studentId === s.studentId && (
-                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-slate-700 leading-relaxed">
-                          {aiLoading ? (
-                            <span className="text-slate-400">กำลังแต่งโจทย์สำหรับนักเรียนคนนี้...</span>
-                          ) : (
-                            <RenderTextWithMath text={aiText} />
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                {roster.map((s) => (
+                  <StudentRosterRow
+                    key={s.studentId}
+                    student={s}
+                    masteryThreshold={settings.masteryThreshold}
+                    classCode={classCode!}
+                  />
+                ))}
               </div>
             )}
           </>

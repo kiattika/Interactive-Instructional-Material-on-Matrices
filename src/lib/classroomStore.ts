@@ -27,6 +27,7 @@ export interface ClassRecord {
   classCode: string;
   createdAt: string;
   active: boolean;
+  note?: string; // teacher-set label (e.g. "ม.5/8") to tell classes apart at a glance
   students: Record<string, StudentRecord>; // keyed by studentId
 }
 
@@ -54,12 +55,14 @@ export function generateClassCode(existingCodes: Iterable<string> = []): string 
   return code;
 }
 
-export function createClass(db: ClassroomDB): { db: ClassroomDB; classCode: string } {
+export function createClass(db: ClassroomDB, note?: string): { db: ClassroomDB; classCode: string } {
   const classCode = generateClassCode(Object.keys(db.classes));
+  const trimmedNote = note?.trim();
   const record: ClassRecord = {
     classCode,
     createdAt: new Date().toISOString(),
     active: true,
+    note: trimmedNote || undefined,
     students: {}
   };
   return {
@@ -131,10 +134,34 @@ export function reopenClass(db: ClassroomDB, classCode: string): ClassMutationRe
   return setActive(db, classCode, true);
 }
 
+export function setClassNote(db: ClassroomDB, classCode: string, note: string): ClassMutationResult {
+  const cls = db.classes[classCode];
+  if (!cls) return { ok: false, error: 'class_not_found' };
+  const trimmed = note.trim();
+  const updatedClass: ClassRecord = { ...cls, note: trimmed || undefined };
+  return { ok: true, db: { classes: { ...db.classes, [classCode]: updatedClass } } };
+}
+
+// Removal is a roster cleanup, not a ban: the studentId simply loses its place here. If they
+// still have the class code and sync again, they reappear as a fresh entry — that's expected.
+// Removing a studentId that isn't present is a no-op success (idempotent), matching REST DELETE
+// semantics; only a genuinely missing CLASS is an error.
+export function removeStudent(db: ClassroomDB, classCode: string, studentId: string): ClassMutationResult {
+  const cls = db.classes[classCode];
+  if (!cls) return { ok: false, error: 'class_not_found' };
+  if (!(studentId in cls.students)) return { ok: true, db };
+
+  const remainingStudents = { ...cls.students };
+  delete remainingStudents[studentId];
+  const updatedClass: ClassRecord = { ...cls, students: remainingStudents };
+  return { ok: true, db: { classes: { ...db.classes, [classCode]: updatedClass } } };
+}
+
 export interface ClassSummary {
   classCode: string;
   createdAt: string;
   active: boolean;
+  note?: string;
   studentCount: number;
 }
 
@@ -144,6 +171,7 @@ export function listClasses(db: ClassroomDB): ClassSummary[] {
       classCode: cls.classCode,
       createdAt: cls.createdAt,
       active: cls.active,
+      note: cls.note,
       studentCount: Object.keys(cls.students).length
     }))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));

@@ -12,13 +12,15 @@ import Dashboard from './pages/Dashboard';
 // to be needed on first paint, and MatrixLab/TeacherPresentation alone are >1000 lines each.
 const LearningPath = lazy(() => import('./pages/LearningPath'));
 const LessonView = lazy(() => import('./pages/LessonView'));
-const PrePostTest = lazy(() => import('./pages/PrePostTest'));
+const PreTestPage = lazy(() => import('./pages/PreTestPage'));
+const PostTestPage = lazy(() => import('./pages/PostTestPage'));
 const MatrixLab = lazy(() => import('./pages/MatrixLab'));
 const HigherOrderLab = lazy(() => import('./pages/HigherOrderLab'));
 const Exercises = lazy(() => import('./pages/Exercises'));
 const TeacherPresentation = lazy(() => import('./pages/TeacherPresentation'));
 const TeacherAnalytics = lazy(() => import('./pages/TeacherAnalytics'));
 const TeacherSettingsPage = lazy(() => import('./pages/TeacherSettingsPage'));
+const LivePollPage = lazy(() => import('./pages/LivePollPage'));
 
 function RouteFallback() {
   return (
@@ -37,13 +39,15 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/learning" element={<LearningPath />} />
             <Route path="/learning/lesson/:id" element={<LessonView />} />
-            <Route path="/diagnostic" element={<PrePostTest />} />
+            <Route path="/pre-test" element={<PreTestPage />} />
+            <Route path="/post-test" element={<PostTestPage />} />
             <Route path="/lab" element={<MatrixLab />} />
             <Route path="/higher-order-lab" element={<HigherOrderLab />} />
             <Route path="/exercises" element={<Exercises />} />
             <Route path="/presentation" element={<TeacherPresentation />} />
             <Route path="/teacher/analytics" element={<TeacherAnalytics />} />
             <Route path="/teacher/settings" element={<TeacherSettingsPage />} />
+            <Route path="/poll/:pollId" element={<LivePollPage />} />
           </Routes>
         </Suspense>
       </AppLayout>

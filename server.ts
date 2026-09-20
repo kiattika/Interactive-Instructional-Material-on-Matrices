@@ -13,8 +13,19 @@ import {
   isClassUsable,
   closeClass,
   reopenClass,
-  listClasses
+  listClasses,
+  setClassNote,
+  removeStudent
 } from './server/classroomFileStore';
+import {
+  createPoll,
+  submitAnswer as submitPollAnswer,
+  fetchResults as fetchPollResults,
+  closePoll,
+  fetchPendingAwards,
+  acknowledgePoll
+} from './server/livePollFileStore';
+import { LIVE_POLL_CORRECT_XP } from './src/lib/livePollStore';
 
 dotenv.config();
 
@@ -198,13 +209,31 @@ ${SOCRATIC_GROUND_RULES}
   // progress here so the teacher can see a real roster. No accounts, no passwords — see
   // PHASE1_UPDATE_NOTES.md section 2 for the design rationale.
 
-  app.post('/api/classroom', async (_req, res) => {
+  app.post('/api/classroom', async (req, res) => {
     try {
-      const { classCode } = await createClass();
+      const note = typeof req.body?.note === 'string' ? req.body.note : undefined;
+      const { classCode } = await createClass(note);
       return res.json({ classCode });
     } catch (error) {
       console.error('Failed to create classroom:', error);
       return res.status(500).json({ error: 'ไม่สามารถสร้างรหัสห้องเรียนได้ในขณะนี้' });
+    }
+  });
+
+  // Lets the teacher relabel a class code later (e.g. "ม.5/8") — purely cosmetic, telling
+  // classes apart at a glance is the whole point (see TeacherSettingsPage.tsx).
+  app.patch('/api/classroom/:code/note', async (req, res) => {
+    try {
+      const classCode = req.params.code.toUpperCase();
+      const note = typeof req.body?.note === 'string' ? req.body.note : '';
+      const result = await setClassNote(classCode, note);
+      if (!result.ok) {
+        return res.status(404).json({ error: 'ไม่พบรหัสห้องเรียนนี้' });
+      }
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('Failed to update classroom note:', error);
+      return res.status(500).json({ error: 'ไม่สามารถบันทึกป้ายชื่อห้องเรียนได้ในขณะนี้' });
     }
   });
 
@@ -257,6 +286,23 @@ ${SOCRATIC_GROUND_RULES}
     }
   });
 
+  // Roster cleanup, not a ban: removing a studentId here doesn't block them from syncing again
+  // under the same class code — they'd simply reappear as a fresh entry (see
+  // classroomStore.ts's removeStudent doc comment).
+  app.delete('/api/classroom/:code/student/:studentId', async (req, res) => {
+    try {
+      const classCode = req.params.code.toUpperCase();
+      const result = await removeStudent(classCode, req.params.studentId);
+      if (!result.ok) {
+        return res.status(404).json({ error: 'ไม่พบรหัสห้องเรียนนี้' });
+      }
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('Failed to remove student from classroom:', error);
+      return res.status(500).json({ error: 'ไม่สามารถลบนักเรียนออกจากห้องเรียนได้ในขณะนี้' });
+    }
+  });
+
   // Closing/reopening: a closed class must stop working everywhere a student- or AI-facing
   // route touches it (see upsertStudentProgress and checkClassroomAuthorized above), but the
   // teacher can still see it (via /api/classroom above, which uses classExists-style listing,
@@ -303,6 +349,121 @@ ${SOCRATIC_GROUND_RULES}
       return res.json({ ok: true });
     }
     return res.status(401).json({ ok: false, error: 'PIN ไม่ถูกต้อง โปรดลองใหม่อีกครั้ง' });
+  });
+
+  // --- Live classroom polls ("ถามชั้นเรียน" quizzes in TeacherPresentation.tsx) ---
+  // No server-side teacher-auth check on create/close, matching the existing pattern for
+  // /api/classroom's own close/reopen/note/remove-student routes above — the Teacher PIN gate
+  // is enforced client-side (see AppLayout.tsx), not re-verified per API call in this app.
+
+  app.post('/api/live-poll', async (req, res) => {
+    try {
+      const { classCode, question, options, correctAnswer } = req.body as {
+        classCode?: string;
+        question?: string;
+        options?: string[];
+        correctAnswer?: string;
+      };
+      if (!classCode || !question || !Array.isArray(options) || options.length < 2 || !correctAnswer) {
+        return res.status(400).json({ error: 'ข้อมูลคำถามไม่ครบถ้วน' });
+      }
+      const { pollId } = await createPoll(classCode.toUpperCase(), question, options, correctAnswer);
+      return res.json({ pollId });
+    } catch (error) {
+      console.error('Failed to create live poll:', error);
+      return res.status(500).json({ error: 'ไม่สามารถเริ่มคำถามสดได้ในขณะนี้' });
+    }
+  });
+
+  app.post('/api/live-poll/:pollId/answer', async (req, res) => {
+    try {
+      const { studentId, displayName, selectedOption } = req.body as {
+        studentId?: string;
+        displayName?: string;
+        selectedOption?: string;
+      };
+      if (!studentId || !selectedOption) {
+        return res.status(400).json({ error: 'ข้อมูลไม่ครบถ้วน' });
+      }
+      const result = await submitPollAnswer(req.params.pollId, studentId, displayName || 'นักเรียนใหม่', selectedOption);
+      if (!result.ok) {
+        // tsconfig here has no strictNullChecks, which leaves the "ok: false" arm of this
+        // discriminated union unnarrowed on plain property access — explicit cast, same
+        // workaround already used elsewhere in this codebase (see the memory note on it).
+        const failure = result as { ok: false; error: 'poll_not_found' | 'poll_closed' };
+        if (failure.error === 'poll_closed') {
+          return res.status(409).json({ error: 'ปิดรับคำตอบแล้ว รอครูเฉลยหน้าจอครับ' });
+        }
+        return res.status(404).json({ error: 'ไม่พบคำถามนี้ หรือคำถามถูกลบไปแล้ว' });
+      }
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('Failed to submit live poll answer:', error);
+      return res.status(500).json({ error: 'ไม่สามารถส่งคำตอบได้ในขณะนี้' });
+    }
+  });
+
+  // Polled every 1-2 seconds by both the teacher's live view AND the student's own poll page —
+  // deliberately never includes correctAnswer (see livePollStore.ts's getResults doc comment).
+  app.get('/api/live-poll/:pollId/results', async (req, res) => {
+    try {
+      const results = await fetchPollResults(req.params.pollId);
+      if (!results) {
+        return res.status(404).json({ error: 'ไม่พบคำถามนี้' });
+      }
+      return res.json(results);
+    } catch (error) {
+      console.error('Failed to fetch live poll results:', error);
+      return res.status(500).json({ error: 'ไม่สามารถดึงผลคำตอบได้ในขณะนี้' });
+    }
+  });
+
+  app.post('/api/live-poll/:pollId/close', async (req, res) => {
+    try {
+      const result = await closePoll(req.params.pollId);
+      if (!result.ok) {
+        return res.status(404).json({ error: 'ไม่พบคำถามนี้' });
+      }
+      return res.json(result.summary);
+    } catch (error) {
+      console.error('Failed to close live poll:', error);
+      return res.status(500).json({ error: 'ไม่สามารถปิดรับคำตอบได้ในขณะนี้' });
+    }
+  });
+
+  // Pull side of the award handshake — see livePollStore.ts's getPendingAwardsForStudent doc
+  // comment for why the server never mutates a student's XP directly.
+  app.get('/api/live-poll/pending-awards', async (req, res) => {
+    try {
+      const classCode = typeof req.query.classCode === 'string' ? req.query.classCode.toUpperCase() : '';
+      const studentId = typeof req.query.studentId === 'string' ? req.query.studentId : '';
+      if (!classCode || !studentId) {
+        return res.status(400).json({ awards: [] });
+      }
+      const polls = await fetchPendingAwards(classCode, studentId);
+      const awards = polls.map((p) => ({ pollId: p.pollId, question: p.question, xp: LIVE_POLL_CORRECT_XP }));
+      return res.json({ awards });
+    } catch (error) {
+      console.error('Failed to fetch pending live-poll awards:', error);
+      return res.status(500).json({ awards: [] });
+    }
+  });
+
+  app.post('/api/live-poll/:pollId/ack', async (req, res) => {
+    try {
+      const studentId = typeof req.query.studentId === 'string' ? req.query.studentId : '';
+      if (!studentId) {
+        return res.status(400).json({ error: 'ข้อมูลไม่ครบถ้วน' });
+      }
+      const result = await acknowledgePoll(req.params.pollId, studentId);
+      if (!result.ok) {
+        return res.status(404).json({ error: 'ไม่พบคำถามนี้' });
+      }
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('Failed to acknowledge live poll award:', error);
+      return res.status(500).json({ error: 'ไม่สามารถบันทึกการรับรางวัลได้ในขณะนี้' });
+    }
   });
 
   // Health check endpoint
