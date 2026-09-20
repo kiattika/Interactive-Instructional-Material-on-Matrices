@@ -3,7 +3,7 @@ import { preprocessMathText } from '../components/math/MathComponents';
 import { CURRICULUM_LESSONS } from '../lib/learningStore';
 import { ENGINEERING_ICT_PROBLEMS } from '../lib/engineeringProblems';
 import { generateExercises } from '../lib/matrixEngine';
-import { DIAGNOSTIC_QUESTIONS } from '../pages/PrePostTest';
+import { PRE_TEST_QUESTIONS, POST_TEST_QUESTIONS } from '../lib/diagnosticQuestions';
 import { INVERSE_CONCEPT_TEXT, CRAMER_CONCEPT_TEXT } from '../pages/MatrixLab';
 import { CIRCUIT_PROBLEM_TEXT, SYSTEM_HEADING_TEXT } from '../pages/HigherOrderLab';
 
@@ -110,16 +110,22 @@ for (const q of generateExercises()) {
 }
 console.log(`✓ Swept ${mcqStrings} MCQ exercise strings`);
 
-// 4. Diagnostic pre/post-test questions (PrePostTest.tsx) — data-driven but previously not
-// swept, unlike the other content sources above.
+// 4. Pre-Test and Post-Test questions (src/lib/diagnosticQuestions.ts) — two separate, parallel
+// 10-question banks (see the Phase 2 split — Post-Test used to just re-render the same
+// DIAGNOSTIC_QUESTIONS array as Pre-Test under a different label).
 let diagnosticStrings = 0;
-for (const q of DIAGNOSTIC_QUESTIONS) {
-  checkString(`diagnostic-${q.id}-text`, q.text);
-  checkString(`diagnostic-${q.id}-explanation`, q.explanation);
-  for (const opt of q.options) checkString(`diagnostic-${q.id}-option`, opt);
-  diagnosticStrings += 2 + q.options.length;
+for (const [bankLabel, bank] of [
+  ['pre-test', PRE_TEST_QUESTIONS],
+  ['post-test', POST_TEST_QUESTIONS]
+] as const) {
+  for (const q of bank) {
+    checkString(`${bankLabel}-${q.id}-text`, q.text);
+    checkString(`${bankLabel}-${q.id}-explanation`, q.explanation);
+    for (const opt of q.options) checkString(`${bankLabel}-${q.id}-option`, opt);
+    diagnosticStrings += 2 + q.options.length;
+  }
 }
-console.log(`✓ Swept ${diagnosticStrings} diagnostic pre/post-test strings`);
+console.log(`✓ Swept ${diagnosticStrings} pre-test + post-test strings (20 questions total)`);
 
 // 5. Hardcoded inline JSX strings in page components — these are NOT data-driven like the
 // sources above, so nothing else catches them. A "$AX = B$" left unwrapped in MatrixLab.tsx

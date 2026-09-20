@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   ChevronRight,
   ChevronLeft,
@@ -6,8 +6,13 @@ import {
   Eye,
   Shuffle,
   HelpCircle,
-  ListFilter
+  ListFilter,
+  Radio,
+  Loader2,
+  CircleStop,
+  Trophy
 } from 'lucide-react';
+import { toDataURL } from 'qrcode';
 import { LinearSystem, SystemDimension, SolutionType } from '../types';
 import {
   solveLinearSystem,
@@ -26,6 +31,14 @@ import {
   MathView,
   formatLatexFraction
 } from '../components/math/MathComponents';
+import { getTeacherClassCode } from '../lib/classroomSync';
+import {
+  createLivePoll,
+  fetchPollResults,
+  closeLivePoll,
+  LivePollPublicView,
+  PollCloseSummaryClient
+} from '../lib/livePollClient';
 
 function getClassroomQuestion(method: 'inverse' | 'cramer' | 'gauss', step: number) {
   if (method === 'gauss') {
@@ -274,6 +287,76 @@ export default function TeacherPresentation() {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [showClassQuestion, setShowClassQuestion] = useState<boolean>(false);
   const [questionRevealed, setQuestionRevealed] = useState<boolean>(false);
+
+  // Live poll state — wraps the existing "Ask the Class" question with a real, phone-answerable
+  // quiz. classCode comes from this browser's last-created class (same source TeacherAnalytics
+  // and TeacherSettingsPage already use); no live poll can start without one.
+  const [teacherClassCode] = useState<string | null>(getTeacherClassCode);
+  const [livePollId, setLivePollId] = useState<string | null>(null);
+  const [pollStarting, setPollStarting] = useState(false);
+  const [pollClosing, setPollClosing] = useState(false);
+  const [pollResults, setPollResults] = useState<LivePollPublicView | null>(null);
+  const [pollCloseSummary, setPollCloseSummary] = useState<PollCloseSummaryClient | null>(null);
+  const [pollQrDataUrl, setPollQrDataUrl] = useState<string | null>(null);
+
+  // A poll belongs to one specific Ask-the-Class question — moving to a different step/method,
+  // or hiding the panel, must not leave a stale poll's results lingering on screen.
+  useEffect(() => {
+    setLivePollId(null);
+    setPollResults(null);
+    setPollCloseSummary(null);
+  }, [currentStep, method, showClassQuestion]);
+
+  useEffect(() => {
+    if (!livePollId) return;
+    let cancelled = false;
+    async function poll() {
+      const results = await fetchPollResults(livePollId!);
+      if (!cancelled && results) setPollResults(results);
+    }
+    poll();
+    const interval = setInterval(poll, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [livePollId]);
+
+  useEffect(() => {
+    if (!livePollId) {
+      setPollQrDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    toDataURL(`${window.location.origin}/poll/${livePollId}`, { width: 200, margin: 1 })
+      .then((url) => {
+        if (!cancelled) setPollQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setPollQrDataUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [livePollId]);
+
+  async function handleStartLivePoll(qObj: { question: string; options: string[]; correctAnswer: string }) {
+    if (!teacherClassCode || pollStarting) return;
+    setPollStarting(true);
+    setPollCloseSummary(null);
+    const result = await createLivePoll(teacherClassCode, qObj.question, qObj.options, qObj.correctAnswer);
+    setPollStarting(false);
+    if (result) setLivePollId(result.pollId);
+  }
+
+  async function handleCloseLivePoll() {
+    if (!livePollId || pollClosing) return;
+    setPollClosing(true);
+    const summary = await closeLivePoll(livePollId);
+    setPollClosing(false);
+    setLivePollId(null);
+    if (summary) setPollCloseSummary(summary);
+  }
 
   // System State
   const [dimension, setDimension] = useState<SystemDimension>('2x2');
@@ -1044,16 +1127,29 @@ export default function TeacherPresentation() {
           const qObj = getClassroomQuestion(method, currentStep);
           return (
             <div className="mt-8 p-6 bg-indigo-950/90 border-2 border-indigo-500 rounded-2xl relative z-20 space-y-4 shadow-2xl animate-fade-in">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <span className="text-xs font-black uppercase tracking-widest text-indigo-300 flex items-center gap-2">
                   <HelpCircle className="w-4 h-4 text-amber-400" /> ถามชั้นเรียน (Ask the Class) — ขั้นตอนที่ {currentStep}
                 </span>
-                <button
-                  onClick={() => setQuestionRevealed(!questionRevealed)}
-                  className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition-colors"
-                >
-                  {questionRevealed ? 'ซ่อนเฉลย' : 'เฉลยคำตอบนักเรียน'}
-                </button>
+                <div className="flex items-center gap-2">
+                  {!livePollId && (
+                    <button
+                      onClick={() => handleStartLivePoll(qObj)}
+                      disabled={pollStarting || !teacherClassCode}
+                      title={teacherClassCode ? undefined : 'ต้องสร้างรหัสห้องเรียนที่หน้าตั้งค่าก่อน'}
+                      className="px-3 py-1 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5"
+                    >
+                      {pollStarting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Radio className="w-3.5 h-3.5" />}
+                      {pollCloseSummary ? 'ถามใหม่อีกครั้ง (Poll Again)' : 'เริ่มรับคำตอบสด (Start Live Poll)'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setQuestionRevealed(!questionRevealed)}
+                    className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition-colors"
+                  >
+                    {questionRevealed ? 'ซ่อนเฉลย' : 'เฉลยคำตอบนักเรียน'}
+                  </button>
+                </div>
               </div>
 
               <p className="text-lg font-bold text-white">
@@ -1073,6 +1169,75 @@ export default function TeacherPresentation() {
                   <p className="font-extrabold text-sm text-emerald-400">✓ คำตอบที่ถูกต้อง: {qObj.correctAnswer}</p>
                   <p className="mt-1">
                     คำอธิบาย: {qObj.explanation}
+                  </p>
+                </div>
+              )}
+
+              {/* Live poll: QR + live vote bars while open, final breakdown once closed. Vote
+                  bars are plain width-scaled divs — just 2-4 options, no charting library
+                  needed, matching the visual style already used for progress bars elsewhere. */}
+              {livePollId && (
+                <div className="p-4 bg-rose-950/60 border border-rose-500/60 rounded-xl space-y-4 animate-fade-in">
+                  <div className="flex flex-col sm:flex-row items-center gap-4">
+                    {pollQrDataUrl && (
+                      <div className="bg-white p-2 rounded-xl flex-shrink-0">
+                        <img src={pollQrDataUrl} alt="QR สำหรับตอบคำถามสด" className="w-32 h-32" />
+                      </div>
+                    )}
+                    <div className="flex-grow w-full space-y-2">
+                      <p className="text-xs font-black text-rose-300 uppercase tracking-widest">
+                        กำลังรับคำตอบสด — {pollResults?.totalAnswers ?? 0} คนตอบแล้ว
+                      </p>
+                      {pollResults?.options.map((opt) => {
+                        const count = pollResults.voteCounts[opt] || 0;
+                        const counts: number[] = Object.values(pollResults.voteCounts);
+                        const maxCount = Math.max(1, ...counts);
+                        const pct = Math.round((count / maxCount) * 100);
+                        return (
+                          <div key={opt} className="space-y-1">
+                            <div className="flex justify-between text-[11px] font-bold text-slate-200">
+                              <span className="truncate pr-2">{opt}</span>
+                              <span>{count}</span>
+                            </div>
+                            <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-rose-500 rounded-full transition-all duration-500"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleCloseLivePoll}
+                    disabled={pollClosing}
+                    className="w-full sm:w-auto px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    {pollClosing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CircleStop className="w-3.5 h-3.5" />}
+                    ปิดรับคำตอบ (Close Poll)
+                  </button>
+                </div>
+              )}
+
+              {pollCloseSummary && (
+                <div className="p-4 bg-emerald-950/60 border border-emerald-500/60 rounded-xl space-y-2 animate-fade-in">
+                  <p className="text-xs font-black text-emerald-300 uppercase tracking-widest flex items-center gap-1.5">
+                    <Trophy className="w-4 h-4" /> ผลคำตอบสด ({pollCloseSummary.totalAnswers} คนตอบ)
+                  </p>
+                  <div className="space-y-1">
+                    {Object.entries(pollCloseSummary.voteCounts).map(([opt, count]) => (
+                      <p key={opt} className="text-[11px] font-bold text-slate-200">
+                        {opt === pollCloseSummary.correctAnswer ? '✓ ' : ''}
+                        {opt}: {count} คน
+                      </p>
+                    ))}
+                  </div>
+                  <p className="text-xs text-emerald-200 pt-1">
+                    {pollCloseSummary.correctDisplayNames.length > 0
+                      ? `ตอบถูก: ${pollCloseSummary.correctDisplayNames.join(', ')}`
+                      : 'ยังไม่มีใครตอบถูกในรอบนี้'}
                   </p>
                 </div>
               )}

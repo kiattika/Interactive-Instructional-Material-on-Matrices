@@ -9,9 +9,13 @@ interface ClassroomJoinModalProps {
   // Only offered when this modal is acting as the mandatory join gate (see AppLayout.tsx) —
   // opens the Teacher PIN prompt instead of the name/code form.
   onOpenTeacherLogin?: () => void;
+  // Pre-fills the code field from a `?code=` URL param (e.g. from scanning the teacher's QR
+  // code — see QRCodeModal.tsx) so the student only has to type their name, not the code too.
+  // Never auto-submits — they still review/confirm before joining.
+  prefillCode?: string;
 }
 
-export function ClassroomJoinModal({ progress, onClose, onOpenTeacherLogin }: ClassroomJoinModalProps) {
+export function ClassroomJoinModal({ progress, onClose, onOpenTeacherLogin, prefillCode }: ClassroomJoinModalProps) {
   const existingLink = getClassroomLink();
   // Joining is mandatory for a student who hasn't joined yet — this is NOT a dismissible
   // onboarding step, it's the access gate itself (see the Phase 2 access-control brief).
@@ -19,7 +23,7 @@ export function ClassroomJoinModal({ progress, onClose, onOpenTeacherLogin }: Cl
   // "view/change my classroom" panel instead.
   const canDismiss = !!existingLink;
   const [name, setName] = useState(progress.studentName === 'นักเรียนใหม่' ? '' : progress.studentName);
-  const [code, setCode] = useState(existingLink?.classCode || '');
+  const [code, setCode] = useState(existingLink?.classCode || prefillCode || '');
   const [status, setStatus] = useState<'idle' | 'joining' | 'error' | 'joined'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
 

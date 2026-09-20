@@ -7,6 +7,7 @@ import {
   BarChart,
   Compass,
   FileCheck2,
+  Award,
   Tv2,
   Users,
   Sparkles,
@@ -21,6 +22,7 @@ import { getClassroomLink } from '../../lib/classroomSync';
 import { hasVerifiedTeacherPin } from '../../lib/teacherAuth';
 import { ClassroomJoinModal } from '../ClassroomJoinModal';
 import { TeacherPinModal } from '../TeacherPinModal';
+import { LivePollAwardWatcher } from '../LivePollAwardWatcher';
 
 const TEACHER_ROUTE_PREFIXES = ['/teacher', '/presentation'];
 
@@ -47,6 +49,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const isTeacherRoute = TEACHER_ROUTE_PREFIXES.some(
     (prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)
   );
+  // Lets a student scan the teacher's QR code (see QRCodeModal.tsx, which encodes
+  // `<origin>/?code=XXXXXX`) straight into the mandatory join gate below, instead of typing
+  // the code by hand. Never auto-submits — ClassroomJoinModal only pre-fills the field.
+  const codeFromUrl = new URLSearchParams(location.search).get('code')?.toUpperCase() || undefined;
 
   const refresh = () => setRefreshTick((t) => t + 1);
 
@@ -92,7 +98,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
   if (!isJoinedStudent && !teacherPinVerified) {
     return (
       <>
-        <ClassroomJoinModal progress={progress} onClose={refresh} onOpenTeacherLogin={() => setShowTeacherPinModal(true)} />
+        <ClassroomJoinModal
+          progress={progress}
+          onClose={refresh}
+          onOpenTeacherLogin={() => setShowTeacherPinModal(true)}
+          prefillCode={codeFromUrl}
+        />
         {showTeacherPinModal && (
           <TeacherPinModal onSuccess={handleTeacherPinSuccess} onCancel={() => setShowTeacherPinModal(false)} cancelLabel="กลับ" />
         )}
@@ -103,10 +114,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const studentNav = [
     { name: 'Dashboard (หน้าแรก)', path: '/', icon: LayoutDashboard },
     { name: 'เส้นทางการเรียนรู้ (12 บท)', path: '/learning', icon: Compass },
-    { name: 'Pre/Post-Test (วัดระดับ)', path: '/diagnostic', icon: FileCheck2 },
+    { name: 'Pre-Test (ทดสอบก่อนเรียน)', path: '/pre-test', icon: FileCheck2 },
     { name: 'Matrix Lab (วิเคราะห์)', path: '/lab', icon: Beaker },
     { name: 'ระบบสมการขั้นสูง (4x4)', path: '/higher-order-lab', icon: Network },
     { name: 'แบบฝึกหัด (Practice)', path: '/exercises', icon: BookOpen },
+    { name: 'Post-Test (ทดสอบหลังเรียน)', path: '/post-test', icon: Award },
   ];
 
   const teacherNav = [
@@ -315,6 +327,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       {showTeacherPinModal && (
         <TeacherPinModal onSuccess={handleTeacherPinSuccess} onCancel={() => setShowTeacherPinModal(false)} cancelLabel="ยกเลิก" />
       )}
+      {isJoinedStudent && classroomLink && <LivePollAwardWatcher classCode={classroomLink.classCode} />}
     </div>
   );
 }

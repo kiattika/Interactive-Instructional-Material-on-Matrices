@@ -9,6 +9,8 @@ import {
   closeClass,
   reopenClass,
   listClasses,
+  setClassNote,
+  removeStudent,
   SyncedProgress
 } from '../lib/classroomStore';
 
@@ -166,6 +168,75 @@ assert(!!summary1 && summary1.active === true, 'reopened class must be listed as
 assert(!!summary1 && summary1.studentCount === 3, 'listClasses must report the correct student count');
 const summary2 = summaries.find((s) => s.classCode === code2);
 assert(!!summary2 && summary2.studentCount === 0, 'a class nobody joined must be listed with 0 students');
+
+// 14. createClass accepts an optional note, trims it, and omits it entirely when blank
+const { db: dbWithNotedClass, classCode: notedCode } = createClass(db, '  ม.5/8  ');
+const notedSummary = listClasses(dbWithNotedClass).find((s) => s.classCode === notedCode);
+assert(notedSummary?.note === 'ม.5/8', 'createClass must trim whitespace around a supplied note');
+
+const { db: dbWithBlankNoteClass, classCode: blankNoteCode } = createClass(dbWithNotedClass, '   ');
+const blankNoteSummary = listClasses(dbWithBlankNoteClass).find((s) => s.classCode === blankNoteCode);
+assert(
+  blankNoteSummary?.note === undefined,
+  'createClass must treat a whitespace-only note as no note at all'
+);
+
+// 15. setClassNote sets, updates, and clears a note on an existing class; fails on unknown code
+const noteSet = setClassNote(dbWithBlankNoteClass, code1, 'ห้อง A');
+assert(noteSet.ok === true, 'setting a note on an existing class must succeed');
+let dbAfterNote = noteSet.ok ? noteSet.db : dbWithBlankNoteClass;
+assert(
+  listClasses(dbAfterNote).find((s) => s.classCode === code1)?.note === 'ห้อง A',
+  'the new note must show up in listClasses'
+);
+
+const noteCleared = setClassNote(dbAfterNote, code1, '   ');
+assert(noteCleared.ok === true, 'clearing a note (blank input) must still succeed');
+dbAfterNote = noteCleared.ok ? noteCleared.db : dbAfterNote;
+assert(
+  listClasses(dbAfterNote).find((s) => s.classCode === code1)?.note === undefined,
+  'a blank note must clear the existing note, not save an empty string'
+);
+
+const noteOnUnknown = setClassNote(dbAfterNote, 'NOPE77', 'x');
+assert(noteOnUnknown.ok === false, 'setting a note on a non-existent class must fail');
+
+db = dbAfterNote;
+
+// 16. removeStudent drops exactly the targeted student, leaves others untouched, and is a
+// no-op success (not an error) when the studentId is already absent — only a missing CLASS
+// is a real error, matching REST DELETE semantics.
+const rosterBeforeRemoval = getRoster(db, code1);
+assert(rosterBeforeRemoval!.length === 3, 'sanity check: class should have 3 students before removal');
+
+const removeResult = removeStudent(db, code1, 'student-2');
+assert(removeResult.ok === true, 'removing an existing student must succeed');
+db = removeResult.ok ? removeResult.db : db;
+const rosterAfterRemoval = getRoster(db, code1);
+assert(rosterAfterRemoval!.length === 2, 'removed student must no longer appear in the roster');
+assert(
+  !rosterAfterRemoval!.some((s) => s.studentId === 'student-2'),
+  'the specifically removed studentId must be gone'
+);
+assert(
+  rosterAfterRemoval!.some((s) => s.studentId === 'student-1') &&
+    rosterAfterRemoval!.some((s) => s.studentId === 'student-3'),
+  'removal must not affect other students in the same class'
+);
+
+const removeAgain = removeStudent(db, code1, 'student-2');
+assert(
+  removeAgain.ok === true,
+  'removing an already-absent studentId must be an idempotent success, not an error'
+);
+
+const removeFromUnknownClass = removeStudent(db, 'NOPE88', 'student-1');
+assert(removeFromUnknownClass.ok === false, 'removing a student from a non-existent class must fail');
+
+// Removal isn't a ban: syncing the same studentId again under the same class code must work
+// exactly like a first-time join.
+const rejoinAfterRemoval = upsertStudentProgress(db, code1, 'student-2', 'Kanya', sampleProgress);
+assert(rejoinAfterRemoval.ok === true, 'a removed student must be able to sync/rejoin normally afterward');
 
 console.log('='.repeat(50));
 console.log('  ALL CLASSROOM SYNC TESTS PASSED!');

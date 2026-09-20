@@ -71,7 +71,7 @@ export default function Dashboard() {
                 ? `${progress.preTestScore}% (Pre)`
                 : 'ยังไม่ได้ทำ'}
             </p>
-            <Link to="/diagnostic" className="text-[10px] font-bold text-indigo-600 hover:underline">
+            <Link to="/post-test" className="text-[10px] font-bold text-indigo-600 hover:underline">
               ดูผลเปรียบเทียบ ➔
             </Link>
           </div>
