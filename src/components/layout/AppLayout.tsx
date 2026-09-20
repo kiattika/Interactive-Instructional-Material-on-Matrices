@@ -48,11 +48,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   const teacherNav = [
     { name: 'Presentation (โหมดฉายจอ)', path: '/presentation', icon: Tv2 },
-    { name: 'วิเคราะห์ผลการเรียน (Analytics)', path: '/analysis', icon: BarChart },
-    { name: 'ตั้งค่าชั้นเรียน (Settings)', path: '/analysis', icon: Users },
+    { name: 'วิเคราะห์ผลการเรียน (Analytics)', path: '/teacher/analytics', icon: BarChart },
+    { name: 'ตั้งค่าชั้นเรียน (Settings)', path: '/teacher/settings', icon: Users },
   ];
 
-  const currentNav = appMode === 'student' ? studentNav : [...teacherNav, ...studentNav];
+  // A student who joined a classroom must never see Teacher Mode as an option — force
+  // student-only navigation regardless of any stale local appMode state.
+  const isJoinedStudent = !!classroomLink;
+  const effectiveMode = isJoinedStudent ? 'student' : appMode;
+  const currentNav = effectiveMode === 'student' ? studentNav : teacherNav;
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans overflow-hidden">
@@ -76,35 +80,38 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
 
-        {/* Mode Switcher */}
-        <div className="hidden lg:flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200">
-          <button
-            onClick={() => {
-              setAppMode('student');
-              navigate('/learning');
-            }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-              appMode === 'student'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <GraduationCap className="w-4 h-4" /> Student Mode
-          </button>
-          <button
-            onClick={() => {
-              setAppMode('teacher');
-              navigate('/presentation');
-            }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-              appMode === 'teacher'
-                ? 'bg-slate-900 text-white shadow-sm'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Tv2 className="w-4 h-4 text-amber-400" /> Teacher Mode
-          </button>
-        </div>
+        {/* Mode Switcher — hidden entirely once a student has joined a classroom via a class
+            code: a joined student must never see a way into Teacher Mode. */}
+        {!isJoinedStudent && (
+          <div className="hidden lg:flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200">
+            <button
+              onClick={() => {
+                setAppMode('student');
+                navigate('/learning');
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                appMode === 'student'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <GraduationCap className="w-4 h-4" /> Student Mode
+            </button>
+            <button
+              onClick={() => {
+                setAppMode('teacher');
+                navigate('/presentation');
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                appMode === 'teacher'
+                  ? 'bg-slate-900 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Tv2 className="w-4 h-4 text-amber-400" /> Teacher Mode
+            </button>
+          </div>
+        )}
 
         {/* Profile Info */}
         <div className="flex items-center gap-3 sm:gap-4">
@@ -137,40 +144,42 @@ export function AppLayout({ children }: { children: ReactNode }) {
           isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
         )}>
           <div className="md:bg-white md:rounded-2xl md:border md:border-slate-200 md:p-3 flex flex-col gap-1.5 md:shadow-sm h-full overflow-y-auto">
-            {/* Mobile Mode Switcher (visible only on mobile menu) */}
-            <div className="lg:hidden flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200 mb-4 flex-shrink-0">
-              <button
-                onClick={() => {
-                  setAppMode('student');
-                  navigate('/learning');
-                  setIsMobileMenuOpen(false);
-                }}
-                className={`flex-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                  appMode === 'student'
-                    ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <GraduationCap className="w-4 h-4" /> Student
-              </button>
-              <button
-                onClick={() => {
-                  setAppMode('teacher');
-                  navigate('/presentation');
-                  setIsMobileMenuOpen(false);
-                }}
-                className={`flex-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                  appMode === 'teacher'
-                    ? 'bg-slate-900 text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Tv2 className="w-4 h-4 text-amber-400" /> Teacher
-              </button>
-            </div>
+            {/* Mobile Mode Switcher — same hide-when-joined rule as the desktop one above */}
+            {!isJoinedStudent && (
+              <div className="lg:hidden flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200 mb-4 flex-shrink-0">
+                <button
+                  onClick={() => {
+                    setAppMode('student');
+                    navigate('/learning');
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`flex-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    appMode === 'student'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <GraduationCap className="w-4 h-4" /> Student
+                </button>
+                <button
+                  onClick={() => {
+                    setAppMode('teacher');
+                    navigate('/presentation');
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`flex-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    appMode === 'teacher'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Tv2 className="w-4 h-4 text-amber-400" /> Teacher
+                </button>
+              </div>
+            )}
 
             <p className="text-[10px] font-bold text-slate-400 uppercase px-3 mb-1 tracking-widest">
-              {appMode === 'student' ? 'เมนูนักเรียน (Student)' : 'เมนูครูผู้สอน (Teacher)'}
+              {effectiveMode === 'student' ? 'เมนูนักเรียน (Student)' : 'เมนูครูผู้สอน (Teacher)'}
             </p>
             {currentNav.map((item) => {
               const Icon = item.icon;

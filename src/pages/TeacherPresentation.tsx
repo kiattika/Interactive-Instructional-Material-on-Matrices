@@ -664,6 +664,7 @@ export default function TeacherPresentation() {
                               A={beforeMat.map(r => r.slice(0, numCols))}
                               B={beforeMat.map(r => r[numCols])}
                               className="text-xl font-bold text-slate-200"
+                              highlightRows={opStep.highlightRows}
                             />
                           </div>
 

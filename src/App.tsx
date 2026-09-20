@@ -17,7 +17,8 @@ const MatrixLab = lazy(() => import('./pages/MatrixLab'));
 const HigherOrderLab = lazy(() => import('./pages/HigherOrderLab'));
 const Exercises = lazy(() => import('./pages/Exercises'));
 const TeacherPresentation = lazy(() => import('./pages/TeacherPresentation'));
-const TeacherDashboard = lazy(() => import('./pages/TeacherDashboard'));
+const TeacherAnalytics = lazy(() => import('./pages/TeacherAnalytics'));
+const TeacherSettingsPage = lazy(() => import('./pages/TeacherSettingsPage'));
 
 function RouteFallback() {
   return (
@@ -41,7 +42,8 @@ export default function App() {
             <Route path="/higher-order-lab" element={<HigherOrderLab />} />
             <Route path="/exercises" element={<Exercises />} />
             <Route path="/presentation" element={<TeacherPresentation />} />
-            <Route path="/analysis" element={<TeacherDashboard />} />
+            <Route path="/teacher/analytics" element={<TeacherAnalytics />} />
+            <Route path="/teacher/settings" element={<TeacherSettingsPage />} />
           </Routes>
         </Suspense>
       </AppLayout>
