@@ -15,6 +15,12 @@ import {
 
 const VARS = ['x', 'y', 'z', 'w'];
 
+// Exported so src/tests/mathRendering.test.ts can sweep these for KaTeX/raw-LaTeX-leak
+// regressions — same rationale as MatrixLab.tsx's *_CONCEPT_TEXT constants.
+export const CIRCUIT_PROBLEM_TEXT =
+  'วงจรไฟฟ้ามี 4 ลูปต่อเรียงกัน เขียนสมการกระแสเมช $I_1, I_2, I_3, I_4$ ตามกฎแรงดันของเคอร์ชอฟฟ์ได้ระบบสมการ 4 ตัวแปรด้านล่าง ลองกด "แก้สมการทีละขั้นตอน" แล้วสังเกตว่า $I_3$ ที่ได้เป็นค่าลบ — หมายความว่าอย่างไรทางวิศวกรรม?';
+export const SYSTEM_HEADING_TEXT = 'ระบบสมการ $AX = B$ (แก้ไขตัวเลขได้อิสระ)';
+
 // 4-loop circuit example — mesh currents I1..I4 (see engineeringProblems.ts for the
 // worked 2x2/3x3 equivalents). Verified numerically: unique solution [10, 6, -3, 8].
 const CIRCUIT_4LOOP: { A: number[][]; B: number[] } = {
@@ -121,15 +127,16 @@ export default function HigherOrderLab() {
 
       {activePreset === 'circuit' && (
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900 leading-relaxed">
-          <strong>โจทย์:</strong> วงจรไฟฟ้ามี 4 ลูปต่อเรียงกัน เขียนสมการกระแสเมช $I_1, I_2, I_3, I_4$ ตามกฎแรงดันของ
-          เคอร์ชอฟฟ์ได้ระบบสมการ 4 ตัวแปรด้านล่าง ลองกด "แก้สมการทีละขั้นตอน" แล้วสังเกตว่า $I_3$ ที่ได้เป็นค่าลบ —
-          หมายความว่าอย่างไรทางวิศวกรรม?
+          <strong>โจทย์:</strong>{' '}
+          <RenderTextWithMath text={CIRCUIT_PROBLEM_TEXT} />
         </div>
       )}
 
       {/* Input grid */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-        <h3 className="text-sm font-bold text-slate-800 mb-3">ระบบสมการ $AX = B$ (แก้ไขตัวเลขได้อิสระ)</h3>
+        <h3 className="text-sm font-bold text-slate-800 mb-3">
+          <RenderTextWithMath text={SYSTEM_HEADING_TEXT} />
+        </h3>
         <div className="flex items-center justify-center gap-3 py-2 overflow-x-auto">
           <span className="text-3xl font-light text-slate-300">[</span>
           <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>

@@ -3,6 +3,9 @@ import { preprocessMathText } from '../components/math/MathComponents';
 import { CURRICULUM_LESSONS } from '../lib/learningStore';
 import { ENGINEERING_ICT_PROBLEMS } from '../lib/engineeringProblems';
 import { generateExercises } from '../lib/matrixEngine';
+import { DIAGNOSTIC_QUESTIONS } from '../pages/PrePostTest';
+import { INVERSE_CONCEPT_TEXT, CRAMER_CONCEPT_TEXT } from '../pages/MatrixLab';
+import { CIRCUIT_PROBLEM_TEXT, SYSTEM_HEADING_TEXT } from '../pages/HigherOrderLab';
 
 let failed = false;
 function fail(message: string) {
@@ -106,6 +109,33 @@ for (const q of generateExercises()) {
   mcqStrings += 2 + (q.options?.length || 0) + q.hints.length;
 }
 console.log(`✓ Swept ${mcqStrings} MCQ exercise strings`);
+
+// 4. Diagnostic pre/post-test questions (PrePostTest.tsx) — data-driven but previously not
+// swept, unlike the other content sources above.
+let diagnosticStrings = 0;
+for (const q of DIAGNOSTIC_QUESTIONS) {
+  checkString(`diagnostic-${q.id}-text`, q.text);
+  checkString(`diagnostic-${q.id}-explanation`, q.explanation);
+  for (const opt of q.options) checkString(`diagnostic-${q.id}-option`, opt);
+  diagnosticStrings += 2 + q.options.length;
+}
+console.log(`✓ Swept ${diagnosticStrings} diagnostic pre/post-test strings`);
+
+// 5. Hardcoded inline JSX strings in page components — these are NOT data-driven like the
+// sources above, so nothing else catches them. A "$AX = B$" left unwrapped in MatrixLab.tsx
+// or HigherOrderLab.tsx (see the Phase 2 bug report) would render as raw text in the app but
+// silently pass every check above, since none of them touch page components at all.
+let inlinePageStrings = 0;
+for (const [label, text] of [
+  ['MatrixLab-inverseConcept', INVERSE_CONCEPT_TEXT],
+  ['MatrixLab-cramerConcept', CRAMER_CONCEPT_TEXT],
+  ['HigherOrderLab-circuitProblem', CIRCUIT_PROBLEM_TEXT],
+  ['HigherOrderLab-systemHeading', SYSTEM_HEADING_TEXT]
+] as const) {
+  checkString(label, text);
+  inlinePageStrings++;
+}
+console.log(`✓ Swept ${inlinePageStrings} hardcoded inline page-component strings`);
 
 if (failed) {
   console.error('\n' + '='.repeat(50));

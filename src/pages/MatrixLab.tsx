@@ -3,6 +3,7 @@ import {
   LinearSystem,
   SystemDimension,
   RowOperation,
+  AppliedProblem,
 } from '../types';
 import {
   det,
@@ -13,6 +14,7 @@ import {
   applyRowOperation,
   formatFractionOrDec,
 } from '../lib/matrixEngine';
+import { ENGINEERING_ICT_PROBLEMS } from '../lib/engineeringProblems';
 import { GeminiTutor } from '../components/GeminiTutor';
 import {
   SystemDisplay,
@@ -73,35 +75,34 @@ const PRESETS = {
     ],
     B: [6, 3, 2],
   },
-  'app_circuit': {
-    name: '⚡ ประยุกต์: วงจรไฟฟ้า 2 ลูป (Kirchhoff)',
-    dimension: '2x2' as SystemDimension,
-    A: [
-      [6, -2],
-      [-2, 8],
-    ],
-    B: [10, 4],
-  },
-  'app_cipher': {
-    name: '🔐 ประยุกต์: ถอดรหัส Hill Cipher',
-    dimension: '2x2' as SystemDimension,
-    A: [
-      [3, 5],
-      [1, 2],
-    ],
-    B: [43, 16],
-  },
-  'app_mixing': {
-    name: '🧪 ประยุกต์: ผสมสารละลาย 3 ชนิด',
-    dimension: '3x3' as SystemDimension,
-    A: [
-      [1, 1, 1],
-      [0.1, 0.2, 0.5],
-      [-2, 0, 1],
-    ],
-    B: [100, 27, 0],
-  },
 };
+
+// Maps each applied-problem preset in the dropdown to its full AppliedProblem record in
+// engineeringProblems.ts (the same source Exercises.tsx uses) — single source of truth, so
+// the A/B numbers here can never drift from the scenario text describing them, and so the
+// scenario itself can be shown (see the Phase 2 bug report: presets used to load only the
+// raw numbers, silently dropping the actual question the student is supposed to answer).
+const APPLIED_PRESET_IDS = {
+  app_circuit: 'eng-circuit-2loop',
+  app_cipher: 'ict-hill-cipher',
+  app_mixing: 'eng-chem-mixing',
+} as const;
+
+function findAppliedProblem(problemId: string): AppliedProblem {
+  const problem = ENGINEERING_ICT_PROBLEMS.find((p) => p.id === problemId);
+  if (!problem) {
+    throw new Error(`Applied problem "${problemId}" not found in ENGINEERING_ICT_PROBLEMS`);
+  }
+  return problem;
+}
+
+// Exported so src/tests/mathRendering.test.ts can sweep these for KaTeX/raw-LaTeX-leak
+// regressions — see PHASE1_UPDATE_NOTES.md and the Phase 2 bug report for why hardcoded
+// inline JSX strings like these need the same coverage as data-driven lesson content.
+export const INVERSE_CONCEPT_TEXT =
+  'จาก $AX = B$ คูณด้วย $A^{-1}$ ทางซ้าย จะได้ $X = A^{-1}B$ (เงื่อนไขสำคัญ: $\\det(A) \\neq 0$)';
+export const CRAMER_CONCEPT_TEXT =
+  'คำนวณ $D = \\det(A)$ และแทนคอลัมน์ของตัวแปรด้วยเวกเตอร์ $B$ เพื่อหา $D_x, D_y, D_z$ แล้วใช้ $x = D_x/D$, $y = D_y/D$, $z = D_z/D$';
 
 export default function MatrixLab() {
   const [dimension, setDimension] = useState<SystemDimension>('2x2');
@@ -112,6 +113,7 @@ export default function MatrixLab() {
   const [vectorStrB, setVectorStrB] = useState<string[]>(['5', '1']);
 
   const [activeTab, setActiveTab] = useState<'inverse' | 'cramer' | 'gauss' | 'compare'>('inverse');
+  const [activeAppliedProblem, setActiveAppliedProblem] = useState<AppliedProblem | null>(null);
   const [cramerSelectedMat, setCramerSelectedMat] = useState<'D' | 'Dx' | 'Dy' | 'Dz'>('D');
   const [gaussMode, setGaussMode] = useState<'auto' | 'manual'>('auto');
 
@@ -134,6 +136,7 @@ export default function MatrixLab() {
 
   // Dimension Change Handler
   const handleDimensionChange = (newDim: SystemDimension) => {
+    setActiveAppliedProblem(null);
     setDimension(newDim);
     if (newDim === '2x2') {
       setMatrixStrA([
@@ -153,12 +156,23 @@ export default function MatrixLab() {
     setManualFeedback(null);
   };
 
-  // Load Preset
-  const handleLoadPreset = (presetKey: keyof typeof PRESETS) => {
-    const p = PRESETS[presetKey];
-    setDimension(p.dimension);
-    setMatrixStrA(p.A.map((r) => r.map((c) => c.toString())));
-    setVectorStrB(p.B.map((c) => c.toString()));
+  // Load Preset — either a plain numeric preset (PRESETS) or an applied-problem preset
+  // (APPLIED_PRESET_IDS), which also surfaces the problem's scenario text above the calculator.
+  const handleLoadPreset = (presetKey: string) => {
+    if (presetKey in APPLIED_PRESET_IDS) {
+      const problemId = APPLIED_PRESET_IDS[presetKey as keyof typeof APPLIED_PRESET_IDS];
+      const problem = findAppliedProblem(problemId);
+      setActiveAppliedProblem(problem);
+      setDimension(problem.system.dimension);
+      setMatrixStrA(problem.system.A.map((r) => r.map((c) => c.toString())));
+      setVectorStrB(problem.system.B.map((c) => c.toString()));
+    } else {
+      const p = PRESETS[presetKey as keyof typeof PRESETS];
+      setActiveAppliedProblem(null);
+      setDimension(p.dimension);
+      setMatrixStrA(p.A.map((r) => r.map((c) => c.toString())));
+      setVectorStrB(p.B.map((c) => c.toString()));
+    }
     setManualAug(null);
     setManualFeedback(null);
   };
@@ -263,7 +277,7 @@ export default function MatrixLab() {
 
           {/* Quick Presets */}
           <select
-            onChange={(e) => e.target.value && handleLoadPreset(e.target.value as any)}
+            onChange={(e) => e.target.value && handleLoadPreset(e.target.value)}
             className="text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-slate-700 outline-none focus:border-indigo-500"
             defaultValue=""
           >
@@ -293,6 +307,39 @@ export default function MatrixLab() {
           </button>
         </div>
       </div>
+
+      {/* Applied-problem scenario banner — shown prominently above the calculator whenever an
+          engineering/ICT preset is active, so the student sees the actual question being asked
+          instead of just raw A/B numbers (Phase 2 bug report). */}
+      {activeAppliedProblem && (
+        <div className="bg-white rounded-2xl border border-indigo-200 p-5 shadow-sm space-y-3 flex-shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border ${
+                activeAppliedProblem.field === 'engineering'
+                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                  : 'bg-teal-50 text-teal-700 border-teal-200'
+              }`}
+            >
+              {activeAppliedProblem.fieldLabel}
+            </span>
+            <span className="text-xs font-bold text-slate-800">{activeAppliedProblem.title}</span>
+          </div>
+          <div className="text-sm text-slate-800 leading-relaxed">
+            <RenderTextWithMath text={activeAppliedProblem.scenario} />
+          </div>
+          <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs space-y-1.5">
+            <p className="font-bold text-amber-900 flex items-center gap-1.5">
+              <HelpCircle className="w-3.5 h-3.5" /> คำถามช่วยคิด (Polya ขั้น 1-2)
+            </p>
+            {activeAppliedProblem.guidingQuestions.map((q, i) => (
+              <p key={i} className="text-amber-900">
+                • <RenderTextWithMath text={q} />
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Main Bento Layout: Left = Matrix Editor & Solvers, Right = Gemini AI Tutor */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-grow overflow-hidden">
@@ -515,7 +562,7 @@ export default function MatrixLab() {
                 <div className="p-3 bg-indigo-50/70 rounded-xl border border-indigo-100 text-xs text-indigo-900">
                   <p className="font-bold">แนวคิดหลัก (Inverse Method):</p>
                   <p>
-                    จาก $AX = B$ คูณด้วย $A^{-1}$ ทางซ้าย จะได้ $X = A^{-1}B$ (เงื่อนไขสำคัญ: $det(A) \neq 0$)
+                    <RenderTextWithMath text={INVERSE_CONCEPT_TEXT} />
                   </p>
                 </div>
 
@@ -590,8 +637,7 @@ export default function MatrixLab() {
                 <div className="p-3 bg-indigo-50/70 rounded-xl border border-indigo-100 text-xs text-indigo-900">
                   <p className="font-bold">แนวคิดหลัก (Cramer's Rule):</p>
                   <p>
-                    คำนวณ $D = det(A)$ และแทนคอลัมน์ของตัวแปรด้วยเวกเตอร์ $B$ เพื่อหา $D_x, D_y, D_z$ แล้วใช้ $x =
-                    D_x/D$, $y = D_y/D$, $z = D_z/D$
+                    <RenderTextWithMath text={CRAMER_CONCEPT_TEXT} />
                   </p>
                 </div>
 
@@ -763,20 +809,26 @@ export default function MatrixLab() {
                                 gridTemplateColumns: `repeat(${gs.augmentedMatrix[0].length}, minmax(0, 1fr))`,
                               }}
                             >
-                              {gs.augmentedMatrix.map((r, ri) =>
-                                r.map((val, ci) => (
-                                  <div
-                                    key={`${ri}-${ci}`}
-                                    className={`w-10 h-10 flex items-center justify-center font-bold text-xs rounded-lg border ${
-                                      ci === gs.augmentedMatrix[0].length - 1
-                                        ? 'bg-amber-50 text-amber-900 border-amber-200 font-black'
-                                        : 'bg-slate-50 text-slate-800 border-slate-200'
-                                    }`}
-                                  >
-                                    {formatFractionOrDec(val)}
-                                  </div>
-                                ))
-                              )}
+                              {gs.augmentedMatrix.map((r, ri) => {
+                                const isRowHighlighted = gs.highlightRows?.includes(ri);
+                                return r.map((val, ci) => {
+                                  const isLastCol = ci === gs.augmentedMatrix[0].length - 1;
+                                  return (
+                                    <div
+                                      key={`${ri}-${ci}`}
+                                      className={`w-10 h-10 flex items-center justify-center font-bold text-xs rounded-lg border-2 transition-colors ${
+                                        isRowHighlighted
+                                          ? 'bg-amber-300 text-amber-950 border-amber-500 font-black shadow-sm'
+                                          : isLastCol
+                                          ? 'bg-amber-50 text-amber-900 border-amber-200 font-black'
+                                          : 'bg-slate-50 text-slate-800 border-slate-200'
+                                      }`}
+                                    >
+                                      {formatFractionOrDec(val)}
+                                    </div>
+                                  );
+                                });
+                              })}
                             </div>
                             <span className="text-2xl font-light text-slate-300">]</span>
                           </div>

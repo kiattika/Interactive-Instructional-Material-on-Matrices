@@ -44,7 +44,7 @@ const TOPIC_ADVICE: Record<TopicKey, string> = {
   solutionTypes: 'แนะนำให้ทบทวนบทเรียนที่ 10 เรื่องการจำแนกประเภทคำตอบ'
 };
 
-const DIAGNOSTIC_QUESTIONS: Question[] = [
+export const DIAGNOSTIC_QUESTIONS: Question[] = [
   {
     id: 'q1',
     topic: 'matrixNotation',

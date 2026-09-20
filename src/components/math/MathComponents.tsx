@@ -218,41 +218,59 @@ interface AugmentedMatrixDisplayProps {
   B: (number | string)[];
   rowOperation?: string;
   className?: string;
+  // Row indices (0-based) to visually highlight — e.g. the row(s) about to be changed by
+  // the next Elementary Row Operation. Rendered as a strong, high-contrast colored box
+  // (not a pale tint) so it reads at a glance, per the Phase 2 step-highlight bug report.
+  highlightRows?: number[];
 }
 
 export const AugmentedMatrixDisplay: React.FC<AugmentedMatrixDisplayProps> = ({
   A,
   B,
   rowOperation,
-  className = ''
+  className = '',
+  highlightRows
 }) => {
   const latex = useMemo(() => {
     const numCols = A[0]?.length || 2;
     const colFormat = 'c'.repeat(numCols) + '|c';
-    const rows = A.map((row, i) =>
-      [...row.map(val => typeof val === 'number' ? formatLatexFraction(val) : formatLatexFraction(val.toString())), formatLatexFraction(B[i])].join(' & ')
-    ).join(' \\\\[0.5em] ');
+    const rows = A.map((row, i) => {
+      const cells = [...row, B[i]].map((val) =>
+        typeof val === 'number' ? formatLatexFraction(val) : formatLatexFraction(val.toString())
+      );
+      const isHighlighted = highlightRows?.includes(i);
+      const formattedCells = isHighlighted
+        ? cells.map((cell) => `\\colorbox{#fcd34d}{$\\color{#78350f}{${cell}}$}`)
+        : cells;
+      return formattedCells.join(' & ');
+    }).join(' \\\\[0.5em] ');
     const matrixLatex = `\\left[\\begin{array}{${colFormat}} ${rows} \\end{array}\\right]`;
 
     if (rowOperation) {
       return `\\xrightarrow{${rowOperation}} \\quad ${matrixLatex}`;
     }
     return matrixLatex;
-  }, [A, B, rowOperation]);
+  }, [A, B, rowOperation, highlightRows]);
 
   return <MathView latex={latex} displayMode={true} className={className} />;
 };
 
-function renderFormattedText(text: string): React.ReactNode {
+// 'light' assumes a light/white surface (bold rendered near-black); 'dark' assumes a dark
+// surface (e.g. GeminiTutor's indigo/slate gradient chat bubbles) and needs a light accent
+// instead, or bold text becomes invisible against the background.
+export type TextTheme = 'light' | 'dark';
+
+function renderFormattedText(text: string, theme: TextTheme = 'light'): React.ReactNode {
   if (!text) return null;
   if (!text.includes('**')) return <span className="whitespace-pre-line">{text}</span>;
 
+  const boldClassName = theme === 'dark' ? 'font-bold text-amber-300' : 'font-bold text-slate-900';
   const parts = text.split('**');
   return (
     <span className="whitespace-pre-line">
       {parts.map((part, i) =>
         i % 2 === 1 ? (
-          <strong key={i} className="font-bold text-slate-900">{part}</strong>
+          <strong key={i} className={boldClassName}>{part}</strong>
         ) : (
           part
         )
@@ -262,7 +280,11 @@ function renderFormattedText(text: string): React.ReactNode {
 }
 
 // Helper to render text containing math formatted with $...$ or $$...$$
-export const RenderTextWithMath: React.FC<{ text: string; className?: string }> = ({ text, className = '' }) => {
+export const RenderTextWithMath: React.FC<{ text: string; className?: string; theme?: TextTheme }> = ({
+  text,
+  className = '',
+  theme = 'light' as TextTheme
+}) => {
   const processedText = useMemo(() => preprocessMathText(text), [text]);
 
   const parts = useMemo(() => {
@@ -302,7 +324,7 @@ export const RenderTextWithMath: React.FC<{ text: string; className?: string }> 
             className={p.displayMode ? "my-3 block text-center overflow-x-auto" : "mx-1 inline-block"}
           />
         ) : (
-          <span key={idx}>{renderFormattedText(p.content)}</span>
+          <span key={idx}>{renderFormattedText(p.content, theme)}</span>
         )
       )}
     </span>

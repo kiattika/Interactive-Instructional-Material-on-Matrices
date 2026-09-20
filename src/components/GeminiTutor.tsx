@@ -114,7 +114,10 @@ export function GeminiTutor({ system, activeMethod, detA, solutionType }: Gemini
               </p>
             )}
             <div className="whitespace-pre-line">
-              <RenderTextWithMath text={m.text} />
+              {/* Both bubble variants are dark surfaces (translucent white-on-dark for the AI,
+                  indigo-600/80 for the user) — theme="light"'s near-black bold text would be
+                  invisible on either, so both use the dark-surface accent color. */}
+              <RenderTextWithMath text={m.text} theme="dark" />
             </div>
           </div>
         ))}
