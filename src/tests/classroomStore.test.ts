@@ -3,8 +3,12 @@ import {
   createClass,
   generateClassCode,
   classExists,
+  isClassActive,
   upsertStudentProgress,
   getRoster,
+  closeClass,
+  reopenClass,
+  listClasses,
   SyncedProgress
 } from '../lib/classroomStore';
 
@@ -108,6 +112,60 @@ assert(
 
 // 7. getRoster on a class code that was never created returns null (distinct from "empty")
 assert(getRoster(db, 'ZZZZZZ') === null, 'an unknown class code must return null, not an empty array');
+
+db = withSecondStudent.ok ? withSecondStudent.db : db;
+
+// 8. New classes are active by default, and classExists/isClassActive agree on a fresh class
+assert(classExists(db, code1), 'a freshly created class must exist');
+assert(isClassActive(db, code1), 'a freshly created class must be active by default');
+
+// 9. closeClass flips active to false without deleting the class or its roster
+const closeResult = closeClass(db, code1);
+assert(closeResult.ok === true, 'closing an existing class must succeed');
+db = closeResult.ok ? closeResult.db : db;
+assert(classExists(db, code1), 'a closed class must still exist (nothing is deleted)');
+assert(!isClassActive(db, code1), 'a closed class must report inactive');
+assert(getRoster(db, code1)!.length === 2, 'a closed class must keep its existing roster intact');
+
+// 10. upsertStudentProgress against a closed class must behave exactly like class_not_found
+const syncAgainstClosed = upsertStudentProgress(db, code1, 'student-3', 'Malee', sampleProgress);
+assert(syncAgainstClosed.ok === false, 'syncing progress into a closed class must fail');
+const closedFailureReason = syncAgainstClosed.ok
+  ? null
+  : (syncAgainstClosed as { ok: false; error: 'class_not_found' }).error;
+assert(
+  closedFailureReason === 'class_not_found',
+  'a closed class must report class_not_found, indistinguishable from a non-existent class'
+);
+assert(
+  getRoster(db, code1)!.length === 2,
+  'a rejected sync against a closed class must not silently add the student anyway'
+);
+
+// 11. reopenClass flips active back to true and syncing works again
+const reopenResult = reopenClass(db, code1);
+assert(reopenResult.ok === true, 'reopening an existing class must succeed');
+db = reopenResult.ok ? reopenResult.db : db;
+assert(isClassActive(db, code1), 'a reopened class must report active again');
+const syncAfterReopen = upsertStudentProgress(db, code1, 'student-3', 'Malee', sampleProgress);
+assert(syncAfterReopen.ok === true, 'syncing progress into a reopened class must succeed again');
+db = syncAfterReopen.ok ? syncAfterReopen.db : db;
+assert(getRoster(db, code1)!.length === 3, 'the new student must now appear in the reopened class roster');
+
+// 12. closeClass/reopenClass against an unknown class code fail cleanly, same shape as upsert
+const closeUnknown = closeClass(db, 'NOPE99');
+assert(closeUnknown.ok === false, 'closing a non-existent class must fail');
+const reopenUnknown = reopenClass(db, 'NOPE99');
+assert(reopenUnknown.ok === false, 'reopening a non-existent class must fail');
+
+// 13. listClasses summarizes every class with the right student counts and active flags
+const summaries = listClasses(db);
+assert(summaries.length === 2, 'listClasses must list every class in the DB');
+const summary1 = summaries.find((s) => s.classCode === code1);
+assert(!!summary1 && summary1.active === true, 'reopened class must be listed as active');
+assert(!!summary1 && summary1.studentCount === 3, 'listClasses must report the correct student count');
+const summary2 = summaries.find((s) => s.classCode === code2);
+assert(!!summary2 && summary2.studentCount === 0, 'a class nobody joined must be listed with 0 students');
 
 console.log('='.repeat(50));
 console.log('  ALL CLASSROOM SYNC TESTS PASSED!');

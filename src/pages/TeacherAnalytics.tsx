@@ -45,11 +45,20 @@ export default function TeacherAnalytics() {
     setAiPanel({ studentId, topic });
     setAiLoading(true);
     setAiText('');
+
+    if (!classCode) {
+      // Not reachable through the UI (the button only renders once a roster loaded, which
+      // requires a classCode) but guard anyway rather than firing a request with no classCode.
+      setAiText('ไม่พบรหัสห้องเรียนที่ใช้งานอยู่');
+      setAiLoading(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/ai-practice-problem', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic })
+        body: JSON.stringify({ topic, classCode, studentId })
       });
       const data = await res.json();
       setAiText(data.problemText || 'ขออภัยครับ ไม่สามารถสร้างโจทย์ได้ในขณะนี้');

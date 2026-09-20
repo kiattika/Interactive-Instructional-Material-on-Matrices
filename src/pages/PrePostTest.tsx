@@ -22,6 +22,7 @@ import {
 } from '../lib/learningStore';
 import { TopicKey, TOPIC_LABELS } from '../lib/topics';
 import { RenderTextWithMath } from '../components/math/MathComponents';
+import { getClassroomLink, getStudentId } from '../lib/classroomSync';
 
 export interface Question {
   id: string;
@@ -137,11 +138,21 @@ export default function PrePostTest() {
     setAiTopic(topic);
     setAiLoading(true);
     setAiProblemText('');
+
+    const classroomLink = getClassroomLink();
+    if (!classroomLink) {
+      // Should not happen — joining a classroom is mandatory before reaching this page — but
+      // fail with a clear message rather than a silent 403 if it somehow is.
+      setAiProblemText('ต้องเข้าร่วมห้องเรียนด้วยรหัสห้องก่อนจึงจะขอโจทย์จาก AI ได้ครับ ลองรีเฟรชหน้านี้');
+      setAiLoading(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/ai-practice-problem', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic })
+        body: JSON.stringify({ topic, classCode: classroomLink.classCode, studentId: getStudentId() })
       });
       const data = await res.json();
       setAiProblemText(data.problemText || 'ขออภัยครับ ครูไม่สามารถสร้างโจทย์ได้ในขณะนี้ ลองใหม่อีกครั้ง');

@@ -17,8 +17,12 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { loadStudentProgress } from '../../lib/learningStore';
-import { getClassroomLink, hasSeenOnboarding } from '../../lib/classroomSync';
+import { getClassroomLink } from '../../lib/classroomSync';
+import { hasVerifiedTeacherPin } from '../../lib/teacherAuth';
 import { ClassroomJoinModal } from '../ClassroomJoinModal';
+import { TeacherPinModal } from '../TeacherPinModal';
+
+const TEACHER_ROUTE_PREFIXES = ['/teacher', '/presentation'];
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
@@ -26,16 +30,75 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const [appMode, setAppMode] = useState<'student' | 'teacher'>('student');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
+  const [showTeacherPinModal, setShowTeacherPinModal] = useState(false);
+  // Bumped whenever a modal completes a state-changing action (join, PIN verify) so this
+  // component re-renders and re-reads the localStorage/sessionStorage-backed values below —
+  // those aren't React state, so nothing else would otherwise trigger the re-render.
+  const [refreshTick, setRefreshTick] = useState(0);
   const progress = loadStudentProgress();
   const classroomLink = getClassroomLink();
+  const teacherPinVerified = hasVerifiedTeacherPin();
 
   useEffect(() => {
     setIsMobileMenuOpen(false);
   }, [location.pathname]);
 
-  useEffect(() => {
-    if (!hasSeenOnboarding()) setShowJoinModal(true);
-  }, []);
+  const isJoinedStudent = !!classroomLink;
+  const isTeacherRoute = TEACHER_ROUTE_PREFIXES.some(
+    (prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)
+  );
+
+  const refresh = () => setRefreshTick((t) => t + 1);
+
+  const enterTeacherMode = () => {
+    setAppMode('teacher');
+    navigate('/presentation');
+  };
+
+  const handleTeacherModeClick = () => {
+    if (teacherPinVerified) {
+      enterTeacherMode();
+    } else {
+      setShowTeacherPinModal(true);
+    }
+  };
+
+  const handleTeacherPinSuccess = () => {
+    setShowTeacherPinModal(false);
+    setShowJoinModal(false);
+    refresh();
+    enterTeacherMode();
+  };
+
+  // Gate 1 (highest priority): any /teacher/* or /presentation route requires a verified PIN
+  // this session, regardless of join status — this is what stops a joined student (or anyone
+  // else) from reaching teacher pages just by typing the URL, which nothing did before.
+  if (isTeacherRoute && !teacherPinVerified) {
+    return (
+      <TeacherPinModal
+        onSuccess={() => {
+          refresh();
+          setAppMode('teacher');
+        }}
+        onCancel={() => navigate('/')}
+      />
+    );
+  }
+
+  // Gate 2: a visitor who hasn't joined a classroom and hasn't verified as a teacher sees
+  // ONLY the mandatory join gate — no sidebar, no routes, nothing else reachable. A verified
+  // teacher bypasses this entirely (e.g. to preview student pages) since they already proved
+  // who they are via Gate 1.
+  if (!isJoinedStudent && !teacherPinVerified) {
+    return (
+      <>
+        <ClassroomJoinModal progress={progress} onClose={refresh} onOpenTeacherLogin={() => setShowTeacherPinModal(true)} />
+        {showTeacherPinModal && (
+          <TeacherPinModal onSuccess={handleTeacherPinSuccess} onCancel={() => setShowTeacherPinModal(false)} cancelLabel="กลับ" />
+        )}
+      </>
+    );
+  }
 
   const studentNav = [
     { name: 'Dashboard (หน้าแรก)', path: '/', icon: LayoutDashboard },
@@ -52,10 +115,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
     { name: 'ตั้งค่าชั้นเรียน (Settings)', path: '/teacher/settings', icon: Users },
   ];
 
-  // A student who joined a classroom must never see Teacher Mode as an option — force
-  // student-only navigation regardless of any stale local appMode state.
-  const isJoinedStudent = !!classroomLink;
-  const effectiveMode = isJoinedStudent ? 'student' : appMode;
+  // If we're actually sitting on a teacher route, Gate 1 above already guarantees the PIN was
+  // verified this session — always show teacher nav there, even for a browser that separately
+  // joined a classroom as a student (verifying as teacher takes precedence on teacher pages).
+  // Everywhere else, a joined student is forced to student-only navigation regardless of any
+  // stale local appMode state, since they must never see a way to switch into Teacher Mode.
+  const effectiveMode = isTeacherRoute ? 'teacher' : isJoinedStudent ? 'student' : appMode;
   const currentNav = effectiveMode === 'student' ? studentNav : teacherNav;
 
   return (
@@ -98,10 +163,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
               <GraduationCap className="w-4 h-4" /> Student Mode
             </button>
             <button
-              onClick={() => {
-                setAppMode('teacher');
-                navigate('/presentation');
-              }}
+              onClick={handleTeacherModeClick}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
                 appMode === 'teacher'
                   ? 'bg-slate-900 text-white shadow-sm'
@@ -163,8 +225,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 </button>
                 <button
                   onClick={() => {
-                    setAppMode('teacher');
-                    navigate('/presentation');
+                    handleTeacherModeClick();
                     setIsMobileMenuOpen(false);
                   }}
                   className={`flex-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
@@ -207,7 +268,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
               className="mt-auto p-3 bg-white border border-slate-200 rounded-xl text-[11px] font-bold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 transition-colors flex items-center gap-2 flex-shrink-0"
             >
               <Users className="w-3.5 h-3.5" />
-              {classroomLink ? `ห้องเรียน: ${classroomLink.classCode}` : 'เข้าร่วมห้องเรียน (ไม่บังคับ)'}
+              {classroomLink ? `ห้องเรียน: ${classroomLink.classCode}` : 'เข้าร่วมห้องเรียน'}
             </button>
 
             <div className="p-3.5 bg-gradient-to-br from-indigo-900 to-slate-900 rounded-xl text-white space-y-2 flex-shrink-0">
@@ -243,7 +304,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </main>
 
       {showJoinModal && (
-        <ClassroomJoinModal progress={progress} onClose={() => setShowJoinModal(false)} />
+        <ClassroomJoinModal
+          progress={progress}
+          onClose={() => {
+            setShowJoinModal(false);
+            refresh();
+          }}
+        />
+      )}
+      {showTeacherPinModal && (
+        <TeacherPinModal onSuccess={handleTeacherPinSuccess} onCancel={() => setShowTeacherPinModal(false)} cancelLabel="ยกเลิก" />
       )}
     </div>
   );
