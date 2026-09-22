@@ -67,6 +67,32 @@ export function numToRational(val: number | string): Rational {
   return simplifyRational([Math.round(val * 1000000), 1000000]);
 }
 
+// Strict numeric-or-fraction parser for raw user input (e.g. MatrixLab.tsx's manual-mode k-value
+// field). Unlike numToRational() below — which is only ever fed already machine-formatted
+// fraction cells (e.g. "209/56" from getGaussSteps()/computeRREF) and silently falls back to 0 on
+// anything unparseable, because that path can never actually receive garbage — this returns null
+// on failure so a caller can reject bad input outright instead of silently defaulting to a value
+// the user never typed (the exact bug: `parseFloat(opK) || 1` turned an unparseable "1/2" into a
+// silent no-op k=1). Supports plain numbers ("0.5", "-2") and simple "n/d" fractions ("1/2",
+// "-1/2") — deliberately NOT parenthesized forms like "-(1/2)", which fail the token check below
+// and are rejected rather than guessed at.
+const NUMERIC_TOKEN = /^-?\d+(\.\d+)?$/;
+export function parseNumericString(str: string): number | null {
+  const trimmed = str.trim();
+  if (!trimmed) return null;
+  if (trimmed.includes('/')) {
+    const parts = trimmed.split('/');
+    if (parts.length !== 2) return null;
+    const [nStr, dStr] = [parts[0].trim(), parts[1].trim()];
+    if (!NUMERIC_TOKEN.test(nStr) || !NUMERIC_TOKEN.test(dStr)) return null;
+    const d = parseFloat(dStr);
+    if (d === 0) return null;
+    return parseFloat(nStr) / d;
+  }
+  if (!NUMERIC_TOKEN.test(trimmed)) return null;
+  return parseFloat(trimmed);
+}
+
 export function addRational(r1: Rational, r2: Rational): Rational {
   return simplifyRational([r1[0] * r2[1] + r2[0] * r1[1], r1[1] * r2[1]]);
 }
