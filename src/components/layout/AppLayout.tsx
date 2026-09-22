@@ -17,7 +17,7 @@ import {
   Network
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { loadStudentProgress } from '../../lib/learningStore';
+import { loadStudentProgress, loadTeacherSettings } from '../../lib/learningStore';
 import { getClassroomLink } from '../../lib/classroomSync';
 import { hasVerifiedTeacherPin } from '../../lib/teacherAuth';
 import { ClassroomJoinModal } from '../ClassroomJoinModal';
@@ -38,6 +38,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   // those aren't React state, so nothing else would otherwise trigger the re-render.
   const [refreshTick, setRefreshTick] = useState(0);
   const progress = loadStudentProgress();
+  const settings = loadTeacherSettings();
   const classroomLink = getClassroomLink();
   const teacherPinVerified = hasVerifiedTeacherPin();
 
@@ -195,9 +196,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                 {progress.studentName}
               </span>
-              <span className="text-xs font-extrabold text-indigo-600">
-                {progress.xp} XP • {progress.earnedBadges.length} Badges
-              </span>
+              {(settings.enableXp || settings.enableBadges) && (
+                <span className="text-xs font-extrabold text-indigo-600">
+                  {[
+                    settings.enableXp ? `${progress.xp} XP` : null,
+                    settings.enableBadges ? `${progress.earnedBadges.length} Badges` : null
+                  ]
+                    .filter(Boolean)
+                    .join(' • ')}
+                </span>
+              )}
             </div>
             <div className="w-8 h-8 sm:w-9 sm:h-9 bg-indigo-100 text-indigo-700 rounded-full border-2 border-indigo-200 flex items-center justify-center font-black text-xs">
               {progress.studentName.slice(0, 2)}
@@ -311,14 +319,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
               </button>
             )}
 
-            <div className="p-3.5 bg-gradient-to-br from-indigo-900 to-slate-900 rounded-xl text-white space-y-2 flex-shrink-0">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
-                <Sparkles className="w-3.5 h-3.5" /> Matrix Assistant
+            {settings.enableAiTutor && (
+              <div className="p-3.5 bg-gradient-to-br from-indigo-900 to-slate-900 rounded-xl text-white space-y-2 flex-shrink-0">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
+                  <Sparkles className="w-3.5 h-3.5" /> Matrix Assistant
+                </div>
+                <p className="text-[11px] text-indigo-200 leading-tight">
+                  ครูผู้ช่วย AI ตอบคำถามและแนะนำการแก้โจทย์ทีละขั้นตอน
+                </p>
               </div>
-              <p className="text-[11px] text-indigo-200 leading-tight">
-                ครูผู้ช่วย AI ตอบคำถามและแนะนำการแก้โจทย์ทีละขั้นตอน
-              </p>
-            </div>
+            )}
 
             {/* Creator Attribution */}
             <div className="mt-2 p-3 bg-slate-50 border border-slate-200/80 rounded-xl text-slate-700 flex flex-col gap-0.5 flex-shrink-0">

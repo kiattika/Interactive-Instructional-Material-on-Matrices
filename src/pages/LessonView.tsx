@@ -91,7 +91,7 @@ export default function LessonView() {
 
     const isCorrect = selectedAnswers[qIndex] === checkQuestions[qIndex]?.correctIndex;
     const xpKey = `lesson${lesson?.id}-check${qIndex}`;
-    if (isCorrect && lesson && !progress.checkQuestionXpAwarded.includes(xpKey)) {
+    if (isCorrect && lesson && settings.enableXp && !progress.checkQuestionXpAwarded.includes(xpKey)) {
       const updatedProgress: StudentProgress = {
         ...progress,
         xp: progress.xp + CHECK_QUESTION_CORRECT_XP,
@@ -130,28 +130,31 @@ export default function LessonView() {
     const updatedProgress: StudentProgress = {
       ...progress,
       completedLessons: newCompleted,
-      xp: progress.xp + 50,
+      xp: settings.enableXp ? progress.xp + 50 : progress.xp,
       lessonScores: { ...progress.lessonScores, [lesson.id]: 100 }
     };
 
-    // Award badges if applicable
-    if (lesson.id === 2 && !updatedProgress.earnedBadges.includes('matrix_explorer')) {
-      updatedProgress.earnedBadges.push('matrix_explorer');
-    }
-    if (lesson.id === 3 && !updatedProgress.earnedBadges.includes('determinant_master')) {
-      updatedProgress.earnedBadges.push('determinant_master');
-    }
-    if (lesson.id === 5 && !updatedProgress.earnedBadges.includes('inverse_solver')) {
-      updatedProgress.earnedBadges.push('inverse_solver');
-    }
-    if (lesson.id === 6 && !updatedProgress.earnedBadges.includes('cramer_specialist')) {
-      updatedProgress.earnedBadges.push('cramer_specialist');
-    }
-    if (lesson.id === 8 && !updatedProgress.earnedBadges.includes('gaussian_expert')) {
-      updatedProgress.earnedBadges.push('gaussian_expert');
-    }
-    if (newCompleted.length >= CURRICULUM_LESSONS.length && !updatedProgress.earnedBadges.includes('matrix_master')) {
-      updatedProgress.earnedBadges.push('matrix_master');
+    // Award badges if applicable — earnedBadges is never touched at all while badges are
+    // disabled, so nothing is retroactively earned the moment a teacher re-enables them.
+    if (settings.enableBadges) {
+      if (lesson.id === 2 && !updatedProgress.earnedBadges.includes('matrix_explorer')) {
+        updatedProgress.earnedBadges.push('matrix_explorer');
+      }
+      if (lesson.id === 3 && !updatedProgress.earnedBadges.includes('determinant_master')) {
+        updatedProgress.earnedBadges.push('determinant_master');
+      }
+      if (lesson.id === 5 && !updatedProgress.earnedBadges.includes('inverse_solver')) {
+        updatedProgress.earnedBadges.push('inverse_solver');
+      }
+      if (lesson.id === 6 && !updatedProgress.earnedBadges.includes('cramer_specialist')) {
+        updatedProgress.earnedBadges.push('cramer_specialist');
+      }
+      if (lesson.id === 8 && !updatedProgress.earnedBadges.includes('gaussian_expert')) {
+        updatedProgress.earnedBadges.push('gaussian_expert');
+      }
+      if (newCompleted.length >= CURRICULUM_LESSONS.length && !updatedProgress.earnedBadges.includes('matrix_master')) {
+        updatedProgress.earnedBadges.push('matrix_master');
+      }
     }
 
     saveStudentProgress(updatedProgress);
@@ -380,7 +383,9 @@ export default function LessonView() {
           <p className="text-xs text-slate-400 mt-0.5">
             {!completedThisSession && !progress.completedLessons.includes(lesson.id) && !allCheckQuestionsAttempted
               ? `ตอบคำถามเช็กความเข้าใจให้ครบ ${checkQuestions.length} ข้อก่อนบันทึกการเรียนจบบทเรียน`
-              : 'สะสม +50 XP และบันทึกความก้าวหน้าลงในโปรไฟล์ของคุณ'}
+              : settings.enableXp
+              ? 'สะสม +50 XP และบันทึกความก้าวหน้าลงในโปรไฟล์ของคุณ'
+              : 'บันทึกความก้าวหน้าลงในโปรไฟล์ของคุณ'}
           </p>
         </div>
         <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -390,7 +395,7 @@ export default function LessonView() {
               disabled={!allCheckQuestionsAttempted}
               className="w-full sm:w-auto px-6 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-500 text-slate-950 font-black text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
             >
-              <CheckCircle2 className="w-4 h-4" /> บันทึกการเรียนจบบทเรียน (+50 XP)
+              <CheckCircle2 className="w-4 h-4" /> บันทึกการเรียนจบบทเรียน{settings.enableXp ? ' (+50 XP)' : ''}
             </button>
           ) : (
             <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs bg-emerald-900/40 px-3 py-2 rounded-xl border border-emerald-700">

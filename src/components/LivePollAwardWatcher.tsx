@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Sparkles } from 'lucide-react';
-import { loadStudentProgress, saveStudentProgress } from '../lib/learningStore';
+import { loadStudentProgress, saveStudentProgress, loadTeacherSettings } from '../lib/learningStore';
 import { getStudentId } from '../lib/classroomSync';
 import { checkPendingAwards, acknowledgeAward } from '../lib/livePollClient';
 
@@ -30,11 +30,17 @@ export const LivePollAwardWatcher: React.FC<LivePollAwardWatcherProps> = ({ clas
       const awards = await checkPendingAwards(classCode, studentId);
       if (cancelled || awards.length === 0) return;
 
+      // Still acknowledge every award while XP is disabled — otherwise these would just pile
+      // up unconsumed and all pay out at once the moment a teacher re-enables XP. Disabling XP
+      // means "stop the increments," not "queue them for later."
+      const enableXp = loadTeacherSettings().enableXp;
       let totalXp = 0;
       for (const award of awards) {
-        const progress = loadStudentProgress();
-        saveStudentProgress({ ...progress, xp: progress.xp + award.xp });
-        totalXp += award.xp;
+        if (enableXp) {
+          const progress = loadStudentProgress();
+          saveStudentProgress({ ...progress, xp: progress.xp + award.xp });
+          totalXp += award.xp;
+        }
         await acknowledgeAward(award.pollId, studentId);
       }
 

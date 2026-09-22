@@ -5,7 +5,6 @@ import {
   Sliders,
   ToggleLeft,
   ToggleRight,
-  BookOpen,
   Info,
   Plus,
   Loader2,
@@ -200,7 +199,7 @@ export default function TeacherSettingsPage() {
           ตั้งค่าการสอน <span className="text-indigo-400">& รหัสห้องเรียน</span>
         </h1>
         <p className="text-xs sm:text-sm text-indigo-200 mt-1">
-          ปรับแต่งเกณฑ์ความเชี่ยวชาญ ระดับความยากแบบฝึกหัด ฟีเจอร์ช่วยสอน และสร้างรหัสห้องเรียน
+          ปรับแต่งเกณฑ์ความเชี่ยวชาญ ฟีเจอร์ช่วยสอน และสร้างรหัสห้องเรียน
         </p>
       </div>
 
@@ -442,49 +441,6 @@ export default function TeacherSettingsPage() {
             onChange={(e) => updateSettings({ masteryThreshold: parseInt(e.target.value, 10) })}
             className="w-full accent-indigo-600"
           />
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-xs font-bold text-slate-700 flex items-center gap-2">
-            <BookOpen className="w-4 h-4 text-indigo-600" />
-            ระดับความยากของแบบฝึกหัด
-          </label>
-          <div className="grid grid-cols-3 gap-2">
-            {(['Easy', 'Medium', 'Hard'] as const).map((diff) => (
-              <button
-                key={diff}
-                type="button"
-                onClick={() => updateSettings({ exerciseDifficulty: diff })}
-                className={`p-2.5 rounded-xl border text-center text-xs font-bold transition-all ${
-                  settings.exerciseDifficulty === diff
-                    ? 'bg-indigo-600 text-white border-indigo-600'
-                    : 'bg-slate-50 border-slate-200 text-slate-600'
-                }`}
-              >
-                {diff}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-xs font-bold text-slate-700 block">จำนวนข้อต่อชุดแบบฝึกหัด</label>
-          <div className="grid grid-cols-3 gap-2">
-            {[5, 10, 20].map((count) => (
-              <button
-                key={count}
-                type="button"
-                onClick={() => updateSettings({ questionsPerSet: count })}
-                className={`p-2.5 rounded-xl border text-center text-xs font-bold transition-all ${
-                  settings.questionsPerSet === count
-                    ? 'bg-indigo-600 text-white border-indigo-600'
-                    : 'bg-slate-50 border-slate-200 text-slate-600'
-                }`}
-              >
-                {count} ข้อ
-              </button>
-            ))}
-          </div>
         </div>
 
         <div className="space-y-3 pt-2 border-t border-slate-100">

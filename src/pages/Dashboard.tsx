@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Award, Target, Zap, BookOpen, Compass, ArrowRight, Sparkles, CheckCircle2, GraduationCap } from 'lucide-react';
-import { loadStudentProgress, CURRICULUM_LESSONS } from '../lib/learningStore';
-import { GeminiTutor } from '../components/GeminiTutor';
+import { loadStudentProgress, loadTeacherSettings, CURRICULUM_LESSONS } from '../lib/learningStore';
 
 export default function Dashboard() {
   const [progress] = useState(loadStudentProgress);
+  const [settings] = useState(loadTeacherSettings);
   const completedCount = progress.completedLessons.length;
   const progressPercent = Math.round((completedCount / CURRICULUM_LESSONS.length) * 100);
 
@@ -45,17 +45,34 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Stat 2 */}
-        <div className="md:col-span-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 bg-emerald-50 border border-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center">
-            <Award className="w-6 h-6" />
+        {/* Stat 2 — hidden entirely if both XP and Badges are disabled, since it has nothing
+            left worth showing. */}
+        {(settings.enableXp || settings.enableBadges) && (
+          <div className="md:col-span-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
+            <div className="w-12 h-12 bg-emerald-50 border border-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center">
+              <Award className="w-6 h-6" />
+            </div>
+            <div>
+              {settings.enableXp && (
+                <>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">คะแนนสะสม (XP)</p>
+                  <p className="text-2xl font-black text-emerald-600">{progress.xp} XP</p>
+                </>
+              )}
+              {settings.enableBadges && (
+                <p
+                  className={
+                    settings.enableXp
+                      ? 'text-[10px] text-slate-400 font-medium'
+                      : 'text-2xl font-black text-emerald-600'
+                  }
+                >
+                  {progress.earnedBadges.length} Badges ได้รับแล้ว
+                </p>
+              )}
+            </div>
           </div>
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">คะแนนสะสม (XP)</p>
-            <p className="text-2xl font-black text-emerald-600">{progress.xp} XP</p>
-            <p className="text-[10px] text-slate-400 font-medium">{progress.earnedBadges.length} Badges ได้รับแล้ว</p>
-          </div>
-        </div>
+        )}
 
         {/* Stat 3 */}
         <div className="md:col-span-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
@@ -77,8 +94,9 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Curriculum Progress List */}
-        <div className="md:col-span-7 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col justify-between">
+        {/* Curriculum Progress List — takes the full remaining width when the AI tutor teaser
+            (below) is hidden, since there's nothing left to share the row with. */}
+        <div className={`${settings.enableAiTutor ? 'md:col-span-7' : 'md:col-span-12'} bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col justify-between`}>
           <div>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-bold text-slate-800">บทเรียนหลักสูตรปัจจุบัน</h3>
@@ -127,34 +145,38 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Gemini Math Tutor Container */}
-        <div className="md:col-span-5 bg-gradient-to-br from-indigo-900 via-indigo-800 to-slate-900 rounded-2xl shadow-lg p-6 flex flex-col justify-between relative overflow-hidden text-white min-h-[360px]">
-          <div className="relative z-10 flex flex-col h-full space-y-4">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-sm shadow-inner">
-                ✨
+        {/* Gemini Math Tutor Container — a teaser for the real AI tutor in MatrixLab.tsx, so it
+            follows the same enableAiTutor gate: hidden entirely, not just cosmetically, when
+            the teacher has turned the AI tutor off. */}
+        {settings.enableAiTutor && (
+          <div className="md:col-span-5 bg-gradient-to-br from-indigo-900 via-indigo-800 to-slate-900 rounded-2xl shadow-lg p-6 flex flex-col justify-between relative overflow-hidden text-white min-h-[360px]">
+            <div className="relative z-10 flex flex-col h-full space-y-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-sm shadow-inner">
+                  ✨
+                </div>
+                <div>
+                  <h3 className="text-white font-bold text-sm">Gemini Math Assistant</h3>
+                  <p className="text-[10px] text-indigo-200">ครูผู้ช่วยวิชาคณิตศาสตร์ (Socratic Guidance)</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-white font-bold text-sm">Gemini Math Assistant</h3>
-                <p className="text-[10px] text-indigo-200">ครูผู้ช่วยวิชาคณิตศาสตร์ (Socratic Guidance)</p>
+
+              <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/10 text-xs leading-relaxed text-indigo-100 flex-grow">
+                "สวัสดี {progress.studentName}! ยินดีต้อนรับสู่บทเรียนระบบสมการเชิงเส้น คุณสามารถถามฉันเรื่องการเขียน AX=B, การหา det(A), Inverse Matrix หรือ Gaussian Elimination ได้ตลอดเวลา!"
+              </div>
+
+              <div className="pt-2">
+                <Link
+                  to={`/learning/lesson/${nextLesson.id}`}
+                  className="w-full py-2.5 bg-white text-indigo-950 font-black text-xs rounded-xl hover:bg-slate-100 transition-colors flex items-center justify-center gap-2 shadow-sm"
+                >
+                  เริ่มเรียน {nextLesson.title} <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
               </div>
             </div>
-
-            <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/10 text-xs leading-relaxed text-indigo-100 flex-grow">
-              "สวัสดี {progress.studentName}! ยินดีต้อนรับสู่บทเรียนระบบสมการเชิงเส้น คุณสามารถถามฉันเรื่องการเขียน AX=B, การหา det(A), Inverse Matrix หรือ Gaussian Elimination ได้ตลอดเวลา!"
-            </div>
-
-            <div className="pt-2">
-              <Link
-                to={`/learning/lesson/${nextLesson.id}`}
-                className="w-full py-2.5 bg-white text-indigo-950 font-black text-xs rounded-xl hover:bg-slate-100 transition-colors flex items-center justify-center gap-2 shadow-sm"
-              >
-                เริ่มเรียน {nextLesson.title} <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
-            </div>
+            <div className="absolute -right-20 -top-20 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl"></div>
           </div>
-          <div className="absolute -right-20 -top-20 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl"></div>
-        </div>
+        )}
       </div>
 
       {/* Creator Attribution Section */}
