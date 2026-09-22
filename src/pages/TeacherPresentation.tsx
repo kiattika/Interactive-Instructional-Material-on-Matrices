@@ -822,7 +822,7 @@ export default function TeacherPresentation() {
                               "สมการนี้เป็นไปไม่ได้ เพราะ 0 ไม่สามารถเท่ากับ {formatLatexFraction(rrefMatrix[rrefMatrix.length - 1][system.A.length])}"
                             </p>
                             <div className="mt-2 text-xl text-rose-400">
-                              <MathView latex="\\boxed{\\text{ไม่มีคำตอบ (No Solution)}}" />
+                              <MathView latex={`\\boxed{\\text{ไม่มีคำตอบ (No Solution)}}`} />
                             </div>
                           </div>
                         )}
@@ -836,7 +836,7 @@ export default function TeacherPresentation() {
                               "ข้อความ 0 = 0 เป็นจริงเสมอ สมการมีความสัมพันธ์ซ้ำซ้อนกัน"
                             </p>
                             <div className="mt-2 text-xl text-emerald-400">
-                              <MathView latex="\\boxed{\\text{มีคำตอบนับไม่ถ้วน (Infinitely Many Solutions)}}" />
+                              <MathView latex={`\\boxed{\\text{มีคำตอบนับไม่ถ้วน (Infinitely Many Solutions)}}`} />
                             </div>
                           </div>
                         )}
@@ -850,7 +850,7 @@ export default function TeacherPresentation() {
                               <p><MathView latex={`1z = ${formatLatexFraction(solution.solution[2])} \\implies z = ${formatLatexFraction(solution.solution[2])}`} /></p>
                             )}
                             <div className="mt-2 text-xl text-emerald-400">
-                              <MathView latex="\\boxed{\\text{มีคำตอบเพียงชุดเดียว (Unique Solution)}}" />
+                              <MathView latex={`\\boxed{\\text{มีคำตอบเพียงชุดเดียว (Unique Solution)}}`} />
                             </div>
                           </div>
                         )}
