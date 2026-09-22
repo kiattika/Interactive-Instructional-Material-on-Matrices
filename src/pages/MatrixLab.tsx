@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   LinearSystem,
   SystemDimension,
   RowOperation,
   AppliedProblem,
+  GaussStep,
 } from '../types';
 import {
   det,
@@ -15,7 +16,9 @@ import {
   formatFractionOrDec,
 } from '../lib/matrixEngine';
 import { ENGINEERING_ICT_PROBLEMS } from '../lib/engineeringProblems';
+import { loadStudentProgress, saveStudentProgress, LAB_WALKTHROUGH_XP } from '../lib/learningStore';
 import { GeminiTutor } from '../components/GeminiTutor';
+import { GaussStepDisplay } from '../components/GaussStepDisplay';
 import {
   SystemDisplay,
   MatrixDisplay,
@@ -36,6 +39,25 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
+
+// Mirrors the LaTeX shape getGaussSteps() builds in matrixEngine.ts, but for an operation the
+// STUDENT picked in the manual-mode UI (see handleApplyManualOp) rather than one the algorithm
+// chose — just echoes their own typed coefficient back rather than re-deriving/simplifying it.
+function buildManualOpLatex(opType: 'swap' | 'multiply' | 'add', row1: number, row2: number, kStr: string): string {
+  const r1 = row1 + 1;
+  const r2 = row2 + 1;
+  if (opType === 'swap') return `R_{${r1}} \\leftrightarrow R_{${r2}}`;
+  if (opType === 'multiply') return `R_{${r1}} \\rightarrow (${kStr})R_{${r1}}`;
+  return `R_{${r1}} \\rightarrow R_{${r1}} + (${kStr})R_{${r2}}`;
+}
+
+// RREF is unique for a given matrix regardless of which valid sequence of row operations reached
+// it, so a straight cell-by-cell comparison against getGaussSteps()'s final step reliably
+// detects "the student finished the reduction," however they got there.
+function augmentedMatricesEqual(a: (number | string)[][], b: (number | string)[][]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((row, i) => row.length === b[i].length && row.every((val, j) => String(val) === String(b[i][j])));
+}
 
 const PRESETS = {
   '2x2_unique': {
@@ -115,15 +137,34 @@ export default function MatrixLab() {
   const [activeTab, setActiveTab] = useState<'inverse' | 'cramer' | 'gauss' | 'compare'>('inverse');
   const [activeAppliedProblem, setActiveAppliedProblem] = useState<AppliedProblem | null>(null);
   const [cramerSelectedMat, setCramerSelectedMat] = useState<'D' | 'Dx' | 'Dy' | 'Dz'>('D');
-  const [gaussMode, setGaussMode] = useState<'auto' | 'manual'>('auto');
+  // Manual Ops is the default so students practice doing the row reduction themselves before
+  // reaching for the passive auto-simulation — see the Phase-3 UX brief.
+  const [gaussMode, setGaussMode] = useState<'auto' | 'manual'>('manual');
 
-  // Manual Gauss Operation State
-  const [manualAug, setManualAug] = useState<number[][] | null>(null);
+  // Manual Gauss Operation State — matrices here can contain fraction STRINGS (e.g. "1/2"), not
+  // just plain numbers, since applyRowOperation() returns the same Rational-formatted shape as
+  // getGaussSteps() (see GaussStepDisplay.tsx's doc comment on why that must never be re-run
+  // through formatFractionOrDec, which expects a raw number).
+  const [manualAug, setManualAug] = useState<(number | string)[][] | null>(null);
   const [opType, setOpType] = useState<'swap' | 'multiply' | 'add'>('add');
   const [opRow1, setOpRow1] = useState<number>(1);
   const [opRow2, setOpRow2] = useState<number>(0);
   const [opK, setOpK] = useState<string>('-2');
   const [manualFeedback, setManualFeedback] = useState<{ isCorrect: boolean; message: string } | null>(null);
+  // The most recently applied manual operation's before-state + description, so the current
+  // step can be shown in the same before→operation→after visual as auto mode (GaussStepDisplay)
+  // instead of a single matrix. Cleared on reset; NOT cleared when a new op succeeds (each
+  // success replaces these with the new before/op, so the display always reflects the latest
+  // step) — only used while manualAug is non-null.
+  const [manualPrevAug, setManualPrevAug] = useState<(number | string)[][] | null>(null);
+  const [manualLastOpLatex, setManualLastOpLatex] = useState<string | null>(null);
+  const [manualLastHighlightRows, setManualLastHighlightRows] = useState<number[] | null>(null);
+
+  const [progress, setProgress] = useState(loadStudentProgress);
+  // True only for the visit where the Gauss walkthrough XP was actually just granted — keeps
+  // the completion banner from claiming "+15 XP!" again on every later visit to an
+  // already-completed walkthrough.
+  const [justEarnedLabXp, setJustEarnedLabXp] = useState(false);
 
   // Learning Mode & Hints
   const [learningMode, setLearningMode] = useState<boolean>(false);
@@ -154,6 +195,9 @@ export default function MatrixLab() {
     }
     setManualAug(null);
     setManualFeedback(null);
+    setManualPrevAug(null);
+    setManualLastOpLatex(null);
+    setManualLastHighlightRows(null);
   };
 
   // Load Preset — either a plain numeric preset (PRESETS) or an applied-problem preset
@@ -175,6 +219,9 @@ export default function MatrixLab() {
     }
     setManualAug(null);
     setManualFeedback(null);
+    setManualPrevAug(null);
+    setManualLastOpLatex(null);
+    setManualLastHighlightRows(null);
   };
 
   // Parse Numeric System
@@ -205,7 +252,7 @@ export default function MatrixLab() {
   const gaussSteps = useMemo(() => getGaussSteps(system), [system]);
 
   // Initial manual augmented matrix
-  const currentManualAug = useMemo(() => {
+  const currentManualAug = useMemo<(number | string)[][]>(() => {
     if (manualAug) return manualAug;
     return system.A.map((r, i) => [...r, system.B[i]]);
   }, [manualAug, system]);
@@ -226,6 +273,9 @@ export default function MatrixLab() {
       return;
     }
 
+    setManualPrevAug(currentManualAug);
+    setManualLastOpLatex(buildManualOpLatex(opType, opRow1, opRow2, opK));
+    setManualLastHighlightRows(opType === 'multiply' ? [opRow1] : [opRow1, opRow2]);
     setManualAug(res.newMatrix);
     setManualFeedback({
       isCorrect: true,
@@ -236,7 +286,51 @@ export default function MatrixLab() {
   const handleResetManualGauss = () => {
     setManualAug(null);
     setManualFeedback(null);
+    setManualPrevAug(null);
+    setManualLastOpLatex(null);
+    setManualLastHighlightRows(null);
   };
+
+  // The current manual step, shown via the same before→operation→after visual as auto mode.
+  // Before any operation has been applied, this has no beforeMatrix — GaussStepDisplay renders
+  // just the starting matrix, same as gaussSteps' own Step 1.
+  const manualDisplayStep: GaussStep = useMemo(
+    () => ({
+      stepIndex: 0,
+      beforeMatrix: manualPrevAug ?? undefined,
+      augmentedMatrix: currentManualAug,
+      operationPerformed: manualLastOpLatex ?? undefined,
+      explanation: '',
+      highlightRows: manualLastHighlightRows ?? undefined,
+    }),
+    [manualPrevAug, currentManualAug, manualLastOpLatex, manualLastHighlightRows]
+  );
+
+  const finalGaussStep = gaussSteps[gaussSteps.length - 1];
+  const isManualGaussComplete =
+    manualAug !== null && !!finalGaussStep && augmentedMatricesEqual(currentManualAug, finalGaussStep.augmentedMatrix);
+
+  // The final-answer verification box only makes sense once the student has actually reached
+  // the end of a step-by-step method — showing it unconditionally (the old behavior) let it
+  // spoil the answer before working through any steps. Cramer's tab has no sequential-step
+  // concept (just a D/Dx/Dy/Dz matrix selector) so it never shows there, and it's removed
+  // entirely from the method-comparison tab per the teacher's request.
+  const lastInverseStepNumber = inverseData.steps[inverseData.steps.length - 1]?.stepNumber;
+  const showVerificationBox =
+    (activeTab === 'inverse' && expandedStep === lastInverseStepNumber) ||
+    (activeTab === 'gauss' && (gaussMode === 'auto' || isManualGaussComplete));
+
+  // One-time XP award for actually completing the manual walkthrough (reaching RREF), not just
+  // opening the tab — see LAB_WALKTHROUGH_XP's doc comment in learningStore.ts for the scale
+  // reasoning, and StudentProgress.matrixLabGaussCompleted for the anti-farm flag.
+  useEffect(() => {
+    if (isManualGaussComplete && !progress.matrixLabGaussCompleted) {
+      const updated = { ...progress, xp: progress.xp + LAB_WALKTHROUGH_XP, matrixLabGaussCompleted: true };
+      saveStudentProgress(updated);
+      setProgress(updated);
+      setJustEarnedLabXp(true);
+    }
+  }, [isManualGaussComplete, progress]);
 
   // Hints array
   const hintsList = [
@@ -292,19 +386,6 @@ export default function MatrixLab() {
             <option value="app_cipher">🔐 ประยุกต์: ถอดรหัส Hill Cipher</option>
             <option value="app_mixing">🧪 ประยุกต์: ผสมสารละลาย 3 ชนิด</option>
           </select>
-
-          {/* Learning Mode Toggle */}
-          <button
-            onClick={() => setLearningMode(!learningMode)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border ${
-              learningMode
-                ? 'bg-amber-50 text-amber-800 border-amber-300 shadow-sm'
-                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-            }`}
-          >
-            <BookOpen className="w-3.5 h-3.5 text-amber-500" />
-            {learningMode ? 'โหมดโต้ตอบ Active' : 'เปิดโหมดโต้ตอบ'}
-          </button>
         </div>
       </div>
 
@@ -459,6 +540,20 @@ export default function MatrixLab() {
             </div>
           </div>
 
+          {/* Learning Mode Toggle — sits directly under the example matrix display so students
+              see it right where they're already looking, instead of buried in the top toolbar. */}
+          <button
+            onClick={() => setLearningMode(!learningMode)}
+            className={`self-start px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border ${
+              learningMode
+                ? 'bg-amber-50 text-amber-800 border-amber-300 shadow-sm'
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5 text-amber-500" />
+            {learningMode ? 'โหมดโต้ตอบ Active' : 'เปิดโหมดโต้ตอบ'}
+          </button>
+
           {/* Interactive Learning Mode & Hint Box (if enabled) */}
           {learningMode && (
             <div className="bg-amber-50/80 rounded-2xl border border-amber-200 p-4 shadow-sm relative">
@@ -572,26 +667,34 @@ export default function MatrixLab() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {inverseData.steps.map((st) => (
+                    {inverseData.steps.map((st) => {
+                      const isActive = expandedStep === st.stepNumber;
+                      return (
                       <div
                         key={st.stepNumber}
-                        className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50"
+                        className={`border rounded-xl overflow-hidden transition-all ${
+                          isActive ? 'border-indigo-300 bg-indigo-50/60 shadow-sm' : 'border-slate-200 bg-slate-50/50'
+                        }`}
                       >
                         <button
                           onClick={() => setExpandedStep(expandedStep === st.stepNumber ? null : st.stepNumber)}
-                          className="w-full px-4 py-3 bg-white hover:bg-slate-50 flex items-center justify-between text-left transition-colors"
+                          className={`w-full px-4 py-3 flex items-center justify-between text-left transition-colors ${
+                            isActive ? 'bg-indigo-100/70 hover:bg-indigo-100' : 'bg-white hover:bg-slate-50'
+                          }`}
                         >
-                          <span className="text-xs font-bold text-slate-800">{st.title}</span>
-                          {expandedStep === st.stepNumber ? (
-                            <ChevronUp className="w-4 h-4 text-slate-400" />
+                          <span className={isActive ? 'text-sm font-black text-indigo-900' : 'text-xs font-bold text-slate-800'}>
+                            {st.title}
+                          </span>
+                          {isActive ? (
+                            <ChevronUp className="w-4 h-4 text-indigo-500" />
                           ) : (
                             <ChevronDown className="w-4 h-4 text-slate-400" />
                           )}
                         </button>
 
                         {expandedStep === st.stepNumber && (
-                          <div className="p-4 border-t border-slate-100 bg-white text-xs space-y-3">
-                            <p className="text-slate-600 leading-relaxed">{st.description}</p>
+                          <div className="p-4 border-t border-indigo-100 bg-white text-xs space-y-3">
+                            <p className="text-sm text-slate-700 leading-relaxed font-medium">{st.description}</p>
 
                             {st.formulaText && (
                               <div className="p-2.5 bg-indigo-50/50 rounded-lg border border-indigo-100 font-mono font-bold text-indigo-800 text-center text-sm">
@@ -625,7 +728,8 @@ export default function MatrixLab() {
                           </div>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -791,48 +895,14 @@ export default function MatrixLab() {
                 {gaussMode === 'auto' ? (
                   <div className="space-y-3">
                     {gaussSteps.map((gs) => (
-                      <div key={gs.stepIndex} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-3">
-                        <div className="flex items-center justify-between">
+                      <div key={gs.stepIndex} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-1">
+                        <div className="flex items-center justify-between flex-wrap gap-1">
                           <span className="font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-100">
-                            Step {gs.stepIndex}: {gs.operationPerformed}
+                            Step {gs.stepIndex}
                           </span>
                           <span className="text-slate-500 font-medium">{gs.explanation}</span>
                         </div>
-
-                        {/* Augmented Matrix View */}
-                        <div className="flex justify-center py-2">
-                          <div className="p-3 bg-white rounded-xl shadow-sm border border-slate-200 inline-flex items-center gap-3">
-                            <span className="text-2xl font-light text-slate-300">[</span>
-                            <div
-                              className="grid gap-2"
-                              style={{
-                                gridTemplateColumns: `repeat(${gs.augmentedMatrix[0].length}, minmax(0, 1fr))`,
-                              }}
-                            >
-                              {gs.augmentedMatrix.map((r, ri) => {
-                                const isRowHighlighted = gs.highlightRows?.includes(ri);
-                                return r.map((val, ci) => {
-                                  const isLastCol = ci === gs.augmentedMatrix[0].length - 1;
-                                  return (
-                                    <div
-                                      key={`${ri}-${ci}`}
-                                      className={`w-10 h-10 flex items-center justify-center font-bold text-xs rounded-lg border-2 transition-colors ${
-                                        isRowHighlighted
-                                          ? 'bg-amber-300 text-amber-950 border-amber-500 font-black shadow-sm'
-                                          : isLastCol
-                                          ? 'bg-amber-50 text-amber-900 border-amber-200 font-black'
-                                          : 'bg-slate-50 text-slate-800 border-slate-200'
-                                      }`}
-                                    >
-                                      {formatFractionOrDec(val)}
-                                    </div>
-                                  );
-                                });
-                              })}
-                            </div>
-                            <span className="text-2xl font-light text-slate-300">]</span>
-                          </div>
-                        </div>
+                        <GaussStepDisplay step={gs} />
                       </div>
                     ))}
                   </div>
@@ -849,72 +919,47 @@ export default function MatrixLab() {
                       </button>
                     </div>
 
-                    {/* Current Manual Augmented Matrix */}
-                    <div className="flex justify-center my-2">
-                      <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm inline-flex items-center gap-3">
-                        <span className="text-3xl font-light text-slate-300">[</span>
-                        <div
-                          className="grid gap-2"
-                          style={{
-                            gridTemplateColumns: `repeat(${currentManualAug[0].length}, minmax(0, 1fr))`,
-                          }}
-                        >
-                          {currentManualAug.map((r, ri) =>
-                            r.map((val, ci) => (
-                              <div
-                                key={`${ri}-${ci}`}
-                                className={`w-12 h-12 flex items-center justify-center font-bold text-sm rounded-xl border ${
-                                  ci === currentManualAug[0].length - 1
-                                    ? 'bg-amber-50 text-amber-900 border-amber-200 font-black'
-                                    : 'bg-slate-50 text-slate-800 border-slate-200'
-                                }`}
-                              >
-                                {formatFractionOrDec(val)}
-                              </div>
-                            ))
-                          )}
-                        </div>
-                        <span className="text-3xl font-light text-slate-300">]</span>
-                      </div>
-                    </div>
+                    {/* Current step: before -> operation -> after (or just the starting matrix
+                        if no operation has been applied yet) */}
+                    <GaussStepDisplay step={manualDisplayStep} />
 
-                    {/* Row Operation Builders */}
-                    <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
-                      <div className="flex items-center gap-4">
-                        <label className="font-bold text-slate-700">ชนิดการดำเนินการ:</label>
-                        <select
-                          value={opType}
-                          onChange={(e) => setOpType(e.target.value as any)}
-                          className="p-1.5 border border-slate-200 rounded-lg text-xs font-semibold outline-none"
-                        >
-                          <option value="swap">สลับแถว (Ri ↔ Rj)</option>
-                          <option value="multiply">คูณด้วยค่าคงที่ (Ri → kRi)</option>
-                          <option value="add">บวกด้วยพหุคูณแถวอื่น (Ri → Ri + kRj)</option>
-                        </select>
+                    {isManualGaussComplete ? (
+                      <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 font-bold text-center">
+                        ✓ ลดรูปครบถ้วนแล้ว! เมทริกซ์อยู่ในรูป Reduced Row Echelon Form
+                        {justEarnedLabXp && <span> — ได้รับ +{LAB_WALKTHROUGH_XP} XP!</span>}
                       </div>
-
-                      <div className="flex flex-wrap items-center gap-3">
-                        <div className="flex items-center gap-1">
-                          <span className="font-medium text-slate-600">แถวเป้าหมาย (Ri):</span>
+                    ) : manualFeedback?.isCorrect ? (
+                      <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2">
+                        <p className="font-bold text-emerald-800">{manualFeedback.message}</p>
+                        <button
+                          onClick={() => setManualFeedback(null)}
+                          className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-2xs transition-colors flex items-center gap-1.5"
+                        >
+                          ทำขั้นตอนถัดไป <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      /* Row Operation Builder */
+                      <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
+                        <div className="flex items-center gap-4">
+                          <label className="font-bold text-slate-700">ชนิดการดำเนินการ:</label>
                           <select
-                            value={opRow1}
-                            onChange={(e) => setOpRow1(parseInt(e.target.value))}
-                            className="p-1.5 border border-slate-200 rounded-lg text-xs font-bold"
+                            value={opType}
+                            onChange={(e) => setOpType(e.target.value as any)}
+                            className="p-1.5 border border-slate-200 rounded-lg text-xs font-semibold outline-none"
                           >
-                            {currentManualAug.map((_, idx) => (
-                              <option key={idx} value={idx}>
-                                R{idx + 1}
-                              </option>
-                            ))}
+                            <option value="swap">สลับแถว (Ri ↔ Rj)</option>
+                            <option value="multiply">คูณด้วยค่าคงที่ (Ri → kRi)</option>
+                            <option value="add">บวกด้วยพหุคูณแถวอื่น (Ri → Ri + kRj)</option>
                           </select>
                         </div>
 
-                        {opType !== 'multiply' && (
+                        <div className="flex flex-wrap items-center gap-3">
                           <div className="flex items-center gap-1">
-                            <span className="font-medium text-slate-600">แถวอ้างอิง (Rj):</span>
+                            <span className="font-medium text-slate-600">แถวเป้าหมาย (Ri):</span>
                             <select
-                              value={opRow2}
-                              onChange={(e) => setOpRow2(parseInt(e.target.value))}
+                              value={opRow1}
+                              onChange={(e) => setOpRow1(parseInt(e.target.value))}
                               className="p-1.5 border border-slate-200 rounded-lg text-xs font-bold"
                             >
                               {currentManualAug.map((_, idx) => (
@@ -924,40 +969,51 @@ export default function MatrixLab() {
                               ))}
                             </select>
                           </div>
-                        )}
 
-                        {opType !== 'swap' && (
-                          <div className="flex items-center gap-1">
-                            <span className="font-medium text-slate-600">ตัวคูณ (k):</span>
-                            <input
-                              type="text"
-                              value={opK}
-                              onChange={(e) => setOpK(e.target.value)}
-                              className="w-16 p-1.5 border border-slate-200 rounded-lg text-xs font-bold text-center"
-                            />
+                          {opType !== 'multiply' && (
+                            <div className="flex items-center gap-1">
+                              <span className="font-medium text-slate-600">แถวอ้างอิง (Rj):</span>
+                              <select
+                                value={opRow2}
+                                onChange={(e) => setOpRow2(parseInt(e.target.value))}
+                                className="p-1.5 border border-slate-200 rounded-lg text-xs font-bold"
+                              >
+                                {currentManualAug.map((_, idx) => (
+                                  <option key={idx} value={idx}>
+                                    R{idx + 1}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+
+                          {opType !== 'swap' && (
+                            <div className="flex items-center gap-1">
+                              <span className="font-medium text-slate-600">ตัวคูณ (k):</span>
+                              <input
+                                type="text"
+                                value={opK}
+                                onChange={(e) => setOpK(e.target.value)}
+                                className="w-16 p-1.5 border border-slate-200 rounded-lg text-xs font-bold text-center"
+                              />
+                            </div>
+                          )}
+
+                          <button
+                            onClick={handleApplyManualOp}
+                            className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-2xs transition-colors ml-auto"
+                          >
+                            คำนวณขั้นแถว
+                          </button>
+                        </div>
+
+                        {manualFeedback && !manualFeedback.isCorrect && (
+                          <div className="p-2.5 rounded-lg font-bold text-xs bg-rose-50 text-rose-800 border border-rose-200">
+                            {manualFeedback.message}
                           </div>
                         )}
-
-                        <button
-                          onClick={handleApplyManualOp}
-                          className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-2xs transition-colors ml-auto"
-                        >
-                          คำนวณขั้นแถว
-                        </button>
                       </div>
-
-                      {manualFeedback && (
-                        <div
-                          className={`p-2.5 rounded-lg font-bold text-xs ${
-                            manualFeedback.isCorrect
-                              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                              : 'bg-rose-50 text-rose-800 border border-rose-200'
-                          }`}
-                        >
-                          {manualFeedback.message}
-                        </div>
-                      )}
-                    </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1018,7 +1074,7 @@ export default function MatrixLab() {
           </div>
 
           {/* Verification Box - Substitute solutions into equations */}
-          {summary.verifications && summary.verifications.length > 0 && (
+          {showVerificationBox && summary.verifications && summary.verifications.length > 0 && (
             <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
               <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-1.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />

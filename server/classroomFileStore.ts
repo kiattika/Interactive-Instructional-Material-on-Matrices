@@ -78,13 +78,14 @@ export async function syncStudentProgress(
   studentId: string,
   displayName: string,
   progress: SyncedProgress
-): Promise<{ ok: true } | { ok: false; error: 'class_not_found' }> {
+): Promise<{ ok: true; note?: string } | { ok: false; error: 'class_not_found' }> {
   const classRef = classesCollection().doc(classCode);
   return getFirestore().runTransaction(async (tx) => {
     const classSnap = await tx.get(classRef);
     if (!classSnap.exists || !(classSnap.data() as ClassDoc).active) {
       return { ok: false, error: 'class_not_found' } as const;
     }
+    const classData = classSnap.data() as ClassDoc;
     const record: StudentRecord = {
       studentId,
       displayName: displayName.trim() || 'นักเรียนใหม่',
@@ -92,7 +93,10 @@ export async function syncStudentProgress(
       progress
     };
     tx.set(classRef.collection('students').doc(studentId), record);
-    return { ok: true } as const;
+    // Returned alongside the ack so the client can cache the classroom's current note (see
+    // classroomSync.ts's ClassroomLink.note) without a dedicated fetch of its own — this
+    // transaction already has the class doc in hand, so it's free.
+    return { ok: true, note: classData.note } as const;
   });
 }
 

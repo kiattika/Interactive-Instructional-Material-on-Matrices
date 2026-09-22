@@ -119,6 +119,26 @@ export function getRoster(db: ClassroomDB, classCode: string): StudentRecord[] |
   return Object.values(cls.students).sort((a, b) => a.displayName.localeCompare(b.displayName, 'th'));
 }
 
+// Device-switch recovery (no login means a new device/browser/cleared storage gets a brand-new
+// random studentId — see classroomSync.ts's getStudentId): lets the join flow find an existing
+// roster entry that's probably the SAME student under a different id, by matching displayName
+// case-insensitively after trimming. Takes a plain roster array (not a ClassroomDB + classCode)
+// so it's directly reusable against a roster the caller already has in hand — e.g. the client
+// fetches GET /api/classroom/:code/roster once and filters it locally with this, no separate
+// server endpoint needed. `excludeStudentId` keeps a student from matching their own existing
+// entry when re-checking under an id they already own.
+export function findStudentsByDisplayName(
+  roster: StudentRecord[],
+  displayName: string,
+  excludeStudentId?: string
+): StudentRecord[] {
+  const target = displayName.trim().toLowerCase();
+  if (!target) return [];
+  return roster.filter(
+    (s) => s.studentId !== excludeStudentId && s.displayName.trim().toLowerCase() === target
+  );
+}
+
 function setActive(db: ClassroomDB, classCode: string, active: boolean): ClassMutationResult {
   const cls = db.classes[classCode];
   if (!cls) return { ok: false, error: 'class_not_found' };

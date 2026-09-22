@@ -11,6 +11,11 @@ const TEACHER_CLASS_CODE_KEY = 'matrix_master_teacher_classcode_v1';
 export interface ClassroomLink {
   classCode: string;
   joinedAt: string;
+  // The classroom's teacher-set note (e.g. "ม.5/9"), cached from the sync/join response so the
+  // sidebar (AppLayout.tsx) can show it without a dedicated fetch of its own. Refreshed on every
+  // successful sync (see syncProgressToClassroom below), so it stays reasonably current without
+  // any extra network round-trip beyond what already happens on every progress save.
+  note?: string;
 }
 
 function randomId(): string {
@@ -40,14 +45,28 @@ export function getClassroomLink(): ClassroomLink | null {
   }
 }
 
-export function setClassroomLink(classCode: string): void {
+export function setClassroomLink(classCode: string, note?: string): void {
   try {
     localStorage.setItem(
       CLASSROOM_LINK_KEY,
-      JSON.stringify({ classCode, joinedAt: new Date().toISOString() })
+      JSON.stringify({ classCode, joinedAt: new Date().toISOString(), note })
     );
   } catch {
     // Classroom sync is a convenience, not a requirement — ignore storage failures.
+  }
+}
+
+// Patches just the note on an already-joined classroom, without touching classCode/joinedAt —
+// called after every successful sync (not just at join time) so a note the teacher sets or
+// changes AFTER a student already joined still reaches that student's sidebar eventually.
+function updateClassroomNote(note: string | undefined): void {
+  try {
+    const raw = localStorage.getItem(CLASSROOM_LINK_KEY);
+    if (!raw) return;
+    const link = JSON.parse(raw) as ClassroomLink;
+    localStorage.setItem(CLASSROOM_LINK_KEY, JSON.stringify({ ...link, note }));
+  } catch {
+    // ignore
   }
 }
 
@@ -117,6 +136,11 @@ export async function syncProgressToClassroom(progress: StudentProgress): Promis
     if (res.status === 404) {
       // Class code no longer exists on the backend (e.g. server data was reset) — stop retrying.
       clearClassroomLink();
+      return;
+    }
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      updateClassroomNote(data?.note);
     }
   } catch {
     // Offline or server unreachable — local progress is unaffected.
@@ -136,11 +160,25 @@ export async function joinClassroom(classCode: string, progress: StudentProgress
       })
     });
     if (res.ok) {
-      setClassroomLink(classCode);
+      const data = await res.json().catch(() => null);
+      setClassroomLink(classCode, data?.note);
       return true;
     }
     return false;
   } catch {
     return false;
+  }
+}
+
+// Points this device's classroom identity at an EXISTING studentId instead of the one
+// getStudentId() would otherwise have generated/remembered — used by the "recover my progress
+// on a new device" flow (see ClassroomJoinModal.tsx) when a student confirms an existing roster
+// entry (found via findStudentsByDisplayName in classroomStore.ts) is actually them. Every
+// subsequent sync then updates that same roster entry instead of creating a separate one.
+export function adoptStudentId(existingStudentId: string): void {
+  try {
+    localStorage.setItem(STUDENT_ID_KEY, existingStudentId);
+  } catch {
+    // Best-effort — if this fails, the join still proceeds under the freshly generated id.
   }
 }

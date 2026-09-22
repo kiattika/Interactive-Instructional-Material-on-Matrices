@@ -49,6 +49,13 @@ export interface StudentProgress {
   // student could reset and re-answer the same check-question — or just revisit a completed
   // lesson — to farm XP indefinitely.
   checkQuestionXpAwarded: string[];
+  // One-time flags for completing an interactive lab walkthrough (see LAB_WALKTHROUGH_XP below)
+  // — tracked separately per lab so a student doing both gets credit for both, not one shared
+  // flag. "Completing" means actually stepping through the walkthrough to its final step
+  // (MatrixLab's manual Gauss mode, HigherOrderLab's progressive reveal), not just opening the
+  // tab, so re-visiting an already-completed walkthrough never re-awards XP.
+  matrixLabGaussCompleted: boolean;
+  higherOrderLabCompleted: boolean;
 }
 
 // A check-question is a much smaller unit of effort than finishing a whole lesson (+50 XP,
@@ -63,10 +70,15 @@ export const CHECK_QUESTION_CORRECT_XP = 5;
 // sits between the two on the same scale.
 export const DIAGNOSTIC_TEST_XP = 25;
 
+// Stepping through an entire interactive lab walkthrough (MatrixLab's manual Gauss elimination,
+// or HigherOrderLab's 4x4 progressive reveal) takes more sustained engagement than answering one
+// live-poll question (LIVE_POLL_CORRECT_XP = 10) — it's several sequential operations, not one
+// tap — but far less than the study + practice behind finishing a whole lesson (+50). Sits just
+// above the live-poll award on the same scale.
+export const LAB_WALKTHROUGH_XP = 15;
+
 export interface TeacherSettings {
   masteryThreshold: number; // default 70
-  exerciseDifficulty: 'Easy' | 'Medium' | 'Hard';
-  questionsPerSet: number; // 5, 10, 20
   enableAiTutor: boolean;
   enableHints: boolean;
   enableXp: boolean;
@@ -721,13 +733,13 @@ export const defaultStudentProgress: StudentProgress = {
   },
   errorLog: [],
   earnedBadges: [],
-  checkQuestionXpAwarded: []
+  checkQuestionXpAwarded: [],
+  matrixLabGaussCompleted: false,
+  higherOrderLabCompleted: false
 };
 
 export const defaultTeacherSettings: TeacherSettings = {
   masteryThreshold: 70,
-  exerciseDifficulty: 'Medium',
-  questionsPerSet: 10,
   enableAiTutor: true,
   enableHints: true,
   enableXp: true,
