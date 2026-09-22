@@ -1,11 +1,12 @@
 import katex from 'katex';
-import { preprocessMathText } from '../components/math/MathComponents';
+import { preprocessMathText, formatLatexFraction } from '../components/math/MathComponents';
 import { CURRICULUM_LESSONS } from '../lib/learningStore';
 import { ENGINEERING_ICT_PROBLEMS } from '../lib/engineeringProblems';
-import { generateExercises } from '../lib/matrixEngine';
+import { generateExercises, getGaussSteps } from '../lib/matrixEngine';
 import { PRE_TEST_QUESTIONS, POST_TEST_QUESTIONS } from '../lib/diagnosticQuestions';
 import { INVERSE_CONCEPT_TEXT, CRAMER_CONCEPT_TEXT } from '../pages/MatrixLab';
 import { CIRCUIT_PROBLEM_TEXT, SYSTEM_HEADING_TEXT } from '../pages/HigherOrderLab';
+import { LinearSystem } from '../types';
 
 let failed = false;
 function fail(message: string) {
@@ -142,6 +143,64 @@ for (const [label, text] of [
   inlinePageStrings++;
 }
 console.log(`✓ Swept ${inlinePageStrings} hardcoded inline page-component strings`);
+
+// 6. Gaussian-elimination step operation labels (getGaussSteps()'s operationPerformed) — these
+// are raw LaTeX fragments meant for MathView/AugmentedMatrixDisplay directly (see
+// GaussStepDisplay.tsx, shared by MatrixLab.tsx and HigherOrderLab.tsx), NOT $...$-delimited
+// prose, so they're checked by rendering them straight through KaTeX rather than through
+// checkString's preprocessMathText/splitParts path. This is the regression test for the "raw
+// LaTeX shows as literal text" bug: a string like "R_{1} \\rightarrow \\frac{1}{2} R_{1}" that
+// somehow stopped being valid LaTeX would be caught here.
+function checkRawLatex(label: string, latex: string | undefined) {
+  if (!latex) return;
+  // strict: false — Step 1's operationPerformed is descriptive Thai prose, not LaTeX (see
+  // GaussStepDisplay.tsx), which KaTeX renders fine but warns loudly about ("Unicode text
+  // character used in math mode") under the default strict:'warn'. Only a real parse failure
+  // (katex-error) should fail this check.
+  const html = katex.renderToString(latex, { throwOnError: false, strict: false, macros: { '\\arraystretch': '1.5' } });
+  if (html.includes('katex-error')) {
+    fail(`[${label}] KaTeX failed to parse raw operation LaTeX: ${JSON.stringify(latex)}`);
+  }
+}
+
+let gaussStepStrings = 0;
+const gaussTestSystems: { label: string; system: LinearSystem }[] = [
+  { label: '2x2', system: { dimension: '2x2', A: [[2, 1], [1, -1]], B: [5, 1], variables: ['x', 'y'] } },
+  // Zero pivot forces a row swap, exercising the R_i \leftrightarrow R_j operation label too.
+  { label: '2x2-needs-swap', system: { dimension: '2x2', A: [[0, 1], [1, 1]], B: [2, 3], variables: ['x', 'y'] } },
+  { label: '3x3', system: { dimension: '3x3', A: [[1, 1, 1], [2, -1, 1], [3, 1, -1]], B: [6, 3, 2], variables: ['x', 'y', 'z'] } },
+  ...ENGINEERING_ICT_PROBLEMS.map((p) => ({ label: `applied-${p.id}`, system: p.system })),
+];
+for (const { label, system } of gaussTestSystems) {
+  for (const step of getGaussSteps(system)) {
+    checkRawLatex(`gauss-${label}-step${step.stepIndex}`, step.operationPerformed);
+    gaussStepStrings++;
+  }
+}
+console.log(`✓ Swept ${gaussStepStrings} Gaussian-elimination step operation labels across ${gaussTestSystems.length} systems`);
+
+// 7. NaN regression guard. getGaussSteps()/applyRowOperation() can return fraction-STRING cells
+// (e.g. "1/2"), and the actual "NaN" rendering bug found in MatrixLab.tsx and HigherOrderLab.tsx
+// was calling formatFractionOrDec (which expects a raw JS number) directly on one of those
+// strings instead of formatLatexFraction (which correctly handles both numbers and
+// fraction-strings) — GaussStepDisplay.tsx now always goes through formatLatexFraction via
+// AugmentedMatrixDisplay. This asserts that path never produces NaN/undefined for any cell
+// getGaussSteps() can actually emit, across the same representative systems as section 6.
+let gaussCellCount = 0;
+for (const { label, system } of gaussTestSystems) {
+  for (const step of getGaussSteps(system)) {
+    for (const row of step.augmentedMatrix) {
+      for (const cell of row) {
+        const latex = formatLatexFraction(cell);
+        if (/NaN|undefined/.test(latex)) {
+          fail(`[gauss-${label}-step${step.stepIndex}] formatLatexFraction produced "${latex}" for cell ${JSON.stringify(cell)}`);
+        }
+        gaussCellCount++;
+      }
+    }
+  }
+}
+console.log(`✓ Swept ${gaussCellCount} Gaussian-elimination matrix cells for NaN/undefined formatting regressions`);
 
 if (failed) {
   console.error('\n' + '='.repeat(50));

@@ -11,7 +11,9 @@ import {
   listClasses,
   setClassNote,
   removeStudent,
-  SyncedProgress
+  findStudentsByDisplayName,
+  SyncedProgress,
+  StudentRecord
 } from '../lib/classroomStore';
 
 function assert(condition: boolean, message: string) {
@@ -237,6 +239,45 @@ assert(removeFromUnknownClass.ok === false, 'removing a student from a non-exist
 // exactly like a first-time join.
 const rejoinAfterRemoval = upsertStudentProgress(db, code1, 'student-2', 'Kanya', sampleProgress);
 assert(rejoinAfterRemoval.ok === true, 'a removed student must be able to sync/rejoin normally afterward');
+
+// 17. findStudentsByDisplayName — device-switch recovery matching (see classroomSync.ts's
+// getStudentId doc comment). Case-insensitive, trimmed, and self-exclusion via excludeStudentId.
+const recoveryRoster: StudentRecord[] = [
+  { studentId: 'old-id-1', displayName: 'สมชาย ใจดี', lastSyncedAt: '2026-01-01T00:00:00.000Z', progress: sampleProgress },
+  { studentId: 'old-id-2', displayName: '  สมชาย ใจดี  ', lastSyncedAt: '2026-01-02T00:00:00.000Z', progress: sampleProgress },
+  { studentId: 'old-id-3', displayName: 'Somchai Jaidee', lastSyncedAt: '2026-01-03T00:00:00.000Z', progress: sampleProgress },
+  { studentId: 'unrelated-id', displayName: 'กัญญา', lastSyncedAt: '2026-01-01T00:00:00.000Z', progress: sampleProgress }
+];
+
+const noMatches = findStudentsByDisplayName(recoveryRoster, 'ไม่มีใครชื่อนี้');
+assert(noMatches.length === 0, 'zero existing records should match an unrelated name');
+
+const singleMatch = findStudentsByDisplayName(recoveryRoster, 'กัญญา');
+assert(
+  singleMatch.length === 1 && singleMatch[0].studentId === 'unrelated-id',
+  'a name with exactly one existing match must return exactly that one record'
+);
+
+const bothMatch = findStudentsByDisplayName(recoveryRoster, 'สมชาย ใจดี');
+assert(
+  bothMatch.length === 2 && bothMatch.some((s) => s.studentId === 'old-id-1') && bothMatch.some((s) => s.studentId === 'old-id-2'),
+  'a name matching multiple existing records (here differing only by surrounding whitespace) must return all of them'
+);
+
+const caseInsensitive = findStudentsByDisplayName(recoveryRoster, '  SOMCHAI JAIDEE ');
+assert(
+  caseInsensitive.length === 1 && caseInsensitive[0].studentId === 'old-id-3',
+  'matching must be case-insensitive and trim whitespace on both the input name and the stored displayName'
+);
+
+const excludingSelf = findStudentsByDisplayName(recoveryRoster, 'สมชาย ใจดี', 'old-id-1');
+assert(
+  excludingSelf.length === 1 && excludingSelf[0].studentId === 'old-id-2',
+  'excludeStudentId must omit that studentId even if its name would otherwise match'
+);
+
+const blankNameMatch = findStudentsByDisplayName(recoveryRoster, '   ');
+assert(blankNameMatch.length === 0, 'a blank name must never match anything');
 
 console.log('='.repeat(50));
 console.log('  ALL CLASSROOM SYNC TESTS PASSED!');

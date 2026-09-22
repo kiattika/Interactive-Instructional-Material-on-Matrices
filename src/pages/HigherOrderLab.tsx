@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { LinearSystem } from '../types';
 import { det, solveLinearSystem, getGaussSteps, formatFractionOrDec } from '../lib/matrixEngine';
+import { loadStudentProgress, saveStudentProgress, LAB_WALKTHROUGH_XP } from '../lib/learningStore';
 import { RenderTextWithMath } from '../components/math/MathComponents';
+import { GaussStepDisplay } from '../components/GaussStepDisplay';
 import {
   Network,
   Sparkles,
@@ -11,6 +13,7 @@ import {
   Infinity as InfinityIcon,
   AlertTriangle,
   Lightbulb,
+  ArrowRight,
 } from 'lucide-react';
 
 const VARS = ['x', 'y', 'z', 'w'];
@@ -48,8 +51,15 @@ export default function HigherOrderLab() {
     CIRCUIT_4LOOP.A.map((row) => row.map((v) => v.toString()))
   );
   const [vectorStrB, setVectorStrB] = useState<string[]>(CIRCUIT_4LOOP.B.map((v) => v.toString()));
-  const [showSteps, setShowSteps] = useState(false);
+  // 0 = steps hidden; 1..N = how many of getGaussSteps()'s steps are currently revealed. Steps
+  // are revealed one at a time via "ขั้นตอนถัดไป" rather than all at once, so the answer isn't
+  // spoiled before the student has followed the reduction — see the redesign note below.
+  const [revealedCount, setRevealedCount] = useState(0);
   const [activePreset, setActivePreset] = useState<'circuit' | 'blank' | null>('circuit');
+  const [progress, setProgress] = useState(loadStudentProgress);
+  // True only for the visit where the walkthrough XP was actually just granted — see
+  // MatrixLab.tsx's identical justEarnedLabXp for why (never re-claim XP on a later revisit).
+  const [justEarnedLabXp, setJustEarnedLabXp] = useState(false);
 
   const system: LinearSystem = useMemo(() => {
     const numA = matrixStrA.map((row) => row.map((v) => (isNaN(parseFloat(v)) ? 0 : parseFloat(v))));
@@ -60,13 +70,29 @@ export default function HigherOrderLab() {
   const detA = useMemo(() => det(system.A), [system]);
   const summary = useMemo(() => solveLinearSystem(system), [system]);
   const gaussSteps = useMemo(() => getGaussSteps(system), [system]);
+  const showSteps = revealedCount > 0;
+  const isWalkthroughComplete = revealedCount >= gaussSteps.length && gaussSteps.length > 0;
+
+  // One-time XP award for stepping all the way through the walkthrough (not just opening it) —
+  // see LAB_WALKTHROUGH_XP's doc comment in learningStore.ts for the scale reasoning, and
+  // StudentProgress.higherOrderLabCompleted for the anti-farm flag (tracked separately from
+  // MatrixLab's matrixLabGaussCompleted so completing both labs credits both).
+  useEffect(() => {
+    if (isWalkthroughComplete && !progress.higherOrderLabCompleted) {
+      const updated = { ...progress, xp: progress.xp + LAB_WALKTHROUGH_XP, higherOrderLabCompleted: true };
+      saveStudentProgress(updated);
+      setProgress(updated);
+      setJustEarnedLabXp(true);
+    }
+  }, [isWalkthroughComplete, progress]);
 
   const loadPreset = (preset: 'circuit' | 'blank') => {
     const data = preset === 'circuit' ? CIRCUIT_4LOOP : BLANK_4X4;
     setMatrixStrA(data.A.map((row) => row.map((v) => v.toString())));
     setVectorStrB(data.B.map((v) => v.toString()));
     setActivePreset(preset);
-    setShowSteps(false);
+    setRevealedCount(0);
+    setJustEarnedLabXp(false);
   };
 
   const handleCellChange = (r: number, c: number, val: string) => {
@@ -74,6 +100,7 @@ export default function HigherOrderLab() {
     next[r][c] = val;
     setMatrixStrA(next);
     setActivePreset(null);
+    setRevealedCount(0);
   };
 
   const handleBChange = (r: number, val: string) => {
@@ -81,6 +108,7 @@ export default function HigherOrderLab() {
     next[r] = val;
     setVectorStrB(next);
     setActivePreset(null);
+    setRevealedCount(0);
   };
 
   return (
@@ -178,7 +206,7 @@ export default function HigherOrderLab() {
             Elimination เท่านั้น (Cramer/Inverse ไม่รองรับขนาดนี้)
           </span>
           <button
-            onClick={() => setShowSteps(!showSteps)}
+            onClick={() => setRevealedCount(showSteps ? 0 : 1)}
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm flex items-center gap-1.5"
           >
             <Sparkles className="w-3.5 h-3.5" /> {showSteps ? 'ซ่อนขั้นตอน' : 'แก้สมการทีละขั้นตอน'}
@@ -186,7 +214,60 @@ export default function HigherOrderLab() {
         </div>
       </div>
 
-      {/* Result summary */}
+      {/* Step-by-step Gaussian elimination — revealed progressively (one new step per click) so
+          the result below isn't spoiled before the student follows the reduction. */}
+      {showSteps && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+          <h3 className="text-sm font-bold text-slate-800 mb-1 flex items-center gap-2">
+            <Lightbulb className="w-4 h-4 text-amber-500" /> ขั้นตอน Gaussian Elimination (Gauss-Jordan)
+          </h3>
+          <p className="text-xs text-slate-500 mb-2">
+            กฎ ERO ทั้ง 3 ข้อเหมือนกับที่เรียนในบทที่ 8 ทุกประการ เพียงมีจำนวนแถว/คอลัมน์เพิ่มขึ้นเป็น 4
+          </p>
+          {gaussSteps.slice(0, revealedCount).map((gs, idx, revealed) => {
+            const isLatest = idx === revealed.length - 1;
+            return (
+              <div
+                key={gs.stepIndex}
+                className={`p-4 rounded-2xl border text-xs space-y-1 transition-all ${
+                  isLatest ? 'bg-indigo-50/60 border-indigo-300 shadow-sm' : 'bg-slate-50 border-slate-200'
+                }`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <span
+                    className={`font-bold px-2.5 py-0.5 rounded-md border w-fit ${
+                      isLatest
+                        ? 'text-sm text-indigo-900 bg-indigo-100 border-indigo-200'
+                        : 'text-indigo-700 bg-indigo-50 border-indigo-100'
+                    }`}
+                  >
+                    Step {gs.stepIndex}
+                  </span>
+                  <span className="text-slate-500 font-medium">{gs.explanation}</span>
+                </div>
+                <GaussStepDisplay step={gs} />
+              </div>
+            );
+          })}
+
+          {isWalkthroughComplete ? (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 font-bold text-center">
+              ✓ ครบทุกขั้นตอนแล้ว! ได้คำตอบสุดท้ายตามที่แสดงด้านล่าง
+              {justEarnedLabXp && <span> — ได้รับ +{LAB_WALKTHROUGH_XP} XP!</span>}
+            </div>
+          ) : (
+            <button
+              onClick={() => setRevealedCount((c) => Math.min(c + 1, gaussSteps.length))}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm flex items-center gap-1.5 mx-auto"
+            >
+              ขั้นตอนถัดไป <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Result summary — shown after the steps, not before, so the answer doesn't spoil the
+          walkthrough that leads to it. */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
         <h3 className="text-sm font-bold text-slate-800 mb-3">ผลลัพธ์และการวิเคราะห์ประเภทคำตอบ</h3>
         {summary.type === 'unique' && summary.solution && (
@@ -223,53 +304,6 @@ export default function HigherOrderLab() {
           </div>
         )}
       </div>
-
-      {/* Step-by-step Gaussian elimination */}
-      {showSteps && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
-          <h3 className="text-sm font-bold text-slate-800 mb-1 flex items-center gap-2">
-            <Lightbulb className="w-4 h-4 text-amber-500" /> ขั้นตอน Gaussian Elimination (Gauss-Jordan)
-          </h3>
-          <p className="text-xs text-slate-500 mb-2">
-            กฎ ERO ทั้ง 3 ข้อเหมือนกับที่เรียนในบทที่ 8 ทุกประการ เพียงมีจำนวนแถว/คอลัมน์เพิ่มขึ้นเป็น 4
-          </p>
-          {gaussSteps.map((gs) => (
-            <div key={gs.stepIndex} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                <span className="font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-100 w-fit">
-                  Step {gs.stepIndex}: <RenderTextWithMath text={`$${gs.operationPerformed || 'เริ่มต้น'}$`} />
-                </span>
-                <span className="text-slate-500 font-medium">{gs.explanation}</span>
-              </div>
-              <div className="flex justify-center py-1 overflow-x-auto">
-                <div className="p-3 bg-white rounded-xl shadow-sm border border-slate-200 inline-flex items-center gap-3">
-                  <span className="text-2xl font-light text-slate-300">[</span>
-                  <div
-                    className="grid gap-2"
-                    style={{ gridTemplateColumns: `repeat(${gs.augmentedMatrix[0].length}, minmax(0, 1fr))` }}
-                  >
-                    {gs.augmentedMatrix.map((r, ri) =>
-                      r.map((val, ci) => (
-                        <div
-                          key={`${ri}-${ci}`}
-                          className={`w-11 h-11 flex items-center justify-center font-bold text-xs rounded-lg border ${
-                            ci === gs.augmentedMatrix[0].length - 1
-                              ? 'bg-amber-50 text-amber-900 border-amber-200 font-black'
-                              : 'bg-slate-50 text-slate-800 border-slate-200'
-                          }`}
-                        >
-                          {formatFractionOrDec(val as number)}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                  <span className="text-2xl font-light text-slate-300">]</span>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Why Gauss only note */}
       <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 text-xs text-indigo-900 leading-relaxed flex gap-3">

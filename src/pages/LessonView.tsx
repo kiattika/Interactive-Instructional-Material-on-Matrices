@@ -9,12 +9,14 @@ import {
   ArrowRight,
   HelpCircle,
   RotateCcw,
-  Award
+  Award,
+  Network
 } from 'lucide-react';
 import {
   CURRICULUM_LESSONS,
   loadStudentProgress,
   saveStudentProgress,
+  loadTeacherSettings,
   StudentProgress,
   CHECK_QUESTION_CORRECT_XP
 } from '../lib/learningStore';
@@ -34,6 +36,7 @@ export default function LessonView() {
 
   const lesson = CURRICULUM_LESSONS.find((l) => l.id === lessonId);
   const [progress, setProgress] = useState<StudentProgress>(loadStudentProgress);
+  const [settings] = useState(loadTeacherSettings);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<number, number>>({});
   const [submitted, setSubmitted] = useState<Record<number, boolean>>({});
   const [completedThisSession, setCompletedThisSession] = useState(false);
@@ -147,7 +150,7 @@ export default function LessonView() {
     if (lesson.id === 8 && !updatedProgress.earnedBadges.includes('gaussian_expert')) {
       updatedProgress.earnedBadges.push('gaussian_expert');
     }
-    if (newCompleted.length >= 10 && !updatedProgress.earnedBadges.includes('matrix_master')) {
+    if (newCompleted.length >= CURRICULUM_LESSONS.length && !updatedProgress.earnedBadges.includes('matrix_master')) {
       updatedProgress.earnedBadges.push('matrix_master');
     }
 
@@ -240,6 +243,26 @@ export default function LessonView() {
           </div>
         ))}
       </div>
+
+      {/* Lesson 12 is framed as this hands-on lab's guided lesson — link straight to it so
+          students don't have to hunt for it in the sidebar. */}
+      {lesson.id === 12 && (
+        <Link
+          to="/higher-order-lab"
+          className="flex items-center justify-between gap-3 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-5 text-white shadow-sm hover:shadow-md transition-shadow"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-white/10 border border-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
+              <Network className="w-5 h-5 text-indigo-300" />
+            </div>
+            <div>
+              <p className="text-sm font-bold">ทดลองแก้ระบบสมการ 4 ตัวแปรจริงได้ที่ Higher-Order Lab</p>
+              <p className="text-xs text-indigo-200">ฝึก Gaussian Elimination กับโจทย์วงจรไฟฟ้า 4 ลูป หรือแก้โจทย์ของคุณเอง</p>
+            </div>
+          </div>
+          <ArrowRight className="w-5 h-5 text-indigo-300 flex-shrink-0" />
+        </Link>
+      )}
 
       {/* Check Questions Section */}
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-6">

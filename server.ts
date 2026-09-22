@@ -265,7 +265,9 @@ ${SOCRATIC_GROUND_RULES}
       if (!result.ok) {
         return res.status(404).json({ error: 'ไม่พบรหัสห้องเรียนนี้' });
       }
-      return res.json({ ok: true });
+      // note is included so the client can cache it (see classroomSync.ts's ClassroomLink.note)
+      // without a dedicated fetch — this call already reads the class doc either way.
+      return res.json({ ok: true, note: result.note });
     } catch (error) {
       console.error('Failed to sync classroom progress:', error);
       return res.status(500).json({ error: 'ไม่สามารถบันทึกความก้าวหน้าได้ในขณะนี้' });

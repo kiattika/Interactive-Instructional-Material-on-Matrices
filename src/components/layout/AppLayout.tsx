@@ -294,10 +294,20 @@ export function AppLayout({ children }: { children: ReactNode }) {
             {effectiveMode === 'student' && (
               <button
                 onClick={() => setShowJoinModal(true)}
-                className="mt-auto p-3 bg-white border border-slate-200 rounded-xl text-[11px] font-bold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 transition-colors flex items-center gap-2 flex-shrink-0"
+                className="mt-auto p-3 bg-white border border-slate-200 rounded-xl text-[11px] font-bold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 transition-colors flex items-start gap-2 flex-shrink-0 text-left"
               >
-                <Users className="w-3.5 h-3.5" />
-                {classroomLink ? `ห้องเรียน: ${classroomLink.classCode}` : 'เข้าร่วมห้องเรียน'}
+                <Users className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                {classroomLink ? (
+                  <span className="min-w-0">
+                    <span className="block truncate">ห้องเรียน: {classroomLink.classCode}</span>
+                    <span className="block truncate text-[10px] font-medium text-slate-400 normal-case">
+                      {classroomLink.note ? `${classroomLink.note} · ` : ''}
+                      {progress.studentName}
+                    </span>
+                  </span>
+                ) : (
+                  'เข้าร่วมห้องเรียน'
+                )}
               </button>
             )}
 
