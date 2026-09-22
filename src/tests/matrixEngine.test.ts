@@ -9,6 +9,8 @@ import {
   getGaussSteps,
   formatFractionOrDec,
   toFraction,
+  parseNumericString,
+  applyRowOperation,
 } from '../lib/matrixEngine';
 import { LinearSystem } from '../types';
 import { CIRCUIT_4LOOP, UNIQUE_4X4, INFINITE_4X4, NO_SOLUTION_4X4 } from '../pages/HigherOrderLab';
@@ -212,6 +214,39 @@ function testAllCases() {
   const solNoSolution = solveLinearSystem(noSolutionSystem);
   assert(solNoSolution.type === 'no_solution', 'Preset "ตัวอย่างไม่มีคำตอบ" must be no solution');
   assert(solNoSolution.zeroRowIndex !== undefined, 'Preset "ตัวอย่างไม่มีคำตอบ" must report a zeroRowIndex');
+
+  // parseNumericString: regression guard for the MatrixLab.tsx manual-mode k-value bug — a
+  // free-text k field like "1/2" used to fail parseFloat() silently and fall back to k=1 (a
+  // no-op) via `parseFloat(opK) || 1`, while the UI still reported success and displayed the
+  // student's typed (but never-applied) operation label. Valid inputs must parse to the correct
+  // number; invalid inputs (including the deliberately-unsupported parenthesized "-(1/2)" form)
+  // must return null so the caller rejects the operation instead of silently defaulting.
+  const validKInputs: [string, number][] = [
+    ['0.5', 0.5],
+    ['-2', -2],
+    ['1/2', 0.5],
+    ['-1/2', -0.5],
+  ];
+  for (const [input, expected] of validKInputs) {
+    const parsed = parseNumericString(input);
+    assert(parsed !== null && Math.abs(parsed - expected) < 1e-9, `parseNumericString("${input}") must equal ${expected}`);
+  }
+
+  const invalidKInputs = ['-(1/2)', '', 'abc', '1/0'];
+  for (const input of invalidKInputs) {
+    assert(parseNumericString(input) === null, `parseNumericString("${input}") must be rejected (null), not silently defaulted`);
+  }
+
+  // Integration-level guard: applying a fraction-derived k must actually change the row, not
+  // silently no-op it (the exact symptom reported: R3's before/after matrices were byte-for-byte
+  // identical despite a labeled x(-1/2) scale operation).
+  const kFromHalf = parseNumericString('-1/2');
+  const scaleResult = applyRowOperation([[0, -2, -4, -16]], { type: 'multiply', row1: 0, k: kFromHalf!, description: '' });
+  assert(scaleResult.isValid, 'Scaling by a valid fraction k must be accepted');
+  assert(
+    scaleResult.newMatrix[0].every((v, j) => Math.abs(parseFloat(String(v)) - [0, 1, 2, 8][j]) < 1e-9),
+    'Scaling [0,-2,-4,-16] by k=-1/2 must produce [0,1,2,8], not leave the row unchanged'
+  );
 
   console.log('\n==================================================');
   console.log('       ALL MATHEMATICAL QA TESTS PASSED!          ');

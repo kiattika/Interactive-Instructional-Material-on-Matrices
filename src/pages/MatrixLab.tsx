@@ -14,6 +14,7 @@ import {
   getGaussSteps,
   applyRowOperation,
   formatFractionOrDec,
+  parseNumericString,
 } from '../lib/matrixEngine';
 import { ENGINEERING_ICT_PROBLEMS } from '../lib/engineeringProblems';
 import { loadStudentProgress, saveStudentProgress, loadTeacherSettings, LAB_WALKTHROUGH_XP } from '../lib/learningStore';
@@ -260,11 +261,29 @@ export default function MatrixLab() {
 
   // Handle Manual Row Operation
   const handleApplyManualOp = () => {
+    // k is a free-text field shared by both 'multiply' (Ri -> kRi) and 'add' (Ri -> Ri + kRj), so
+    // this validation covers both op types. A parse failure (e.g. the unsupported "-(1/2)" form,
+    // empty input, or garbage text) must be rejected outright, NOT silently coerced to a default
+    // — parseFloat(opK) || 1 used to turn any unparseable k into a silent no-op (k=1) while still
+    // reporting success, leaving the row unchanged with no indication anything went wrong.
+    let kValue = 1;
+    if (opType !== 'swap') {
+      const parsed = parseNumericString(opK);
+      if (parsed === null) {
+        setManualFeedback({
+          isCorrect: false,
+          message: 'ไม่เข้าใจค่า k ที่กรอก กรุณากรอกตัวเลขหรือเศษส่วน เช่น 0.5 หรือ -1/2',
+        });
+        return;
+      }
+      kValue = parsed;
+    }
+
     const op: RowOperation = {
       type: opType,
       row1: opRow1,
       row2: opRow2,
-      k: parseFloat(opK) || 1,
+      k: kValue,
       description: '',
     };
 
@@ -1040,7 +1059,8 @@ export default function MatrixLab() {
                                 type="text"
                                 value={opK}
                                 onChange={(e) => setOpK(e.target.value)}
-                                className="w-16 p-1.5 border border-slate-200 rounded-lg text-xs font-bold text-center"
+                                placeholder="เช่น 0.5 หรือ -1/2"
+                                className="w-24 p-1.5 border border-slate-200 rounded-lg text-xs font-bold text-center"
                               />
                             </div>
                           )}
