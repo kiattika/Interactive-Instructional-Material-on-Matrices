@@ -26,7 +26,9 @@ export const SYSTEM_HEADING_TEXT = 'ระบบสมการ $AX = B$ (แก
 
 // 4-loop circuit example — mesh currents I1..I4 (see engineeringProblems.ts for the
 // worked 2x2/3x3 equivalents). Verified numerically: unique solution [10, 6, -3, 8].
-const CIRCUIT_4LOOP: { A: number[][]; B: number[] } = {
+// Exported so src/tests/matrixEngine.test.ts can re-verify these presets against
+// solveLinearSystem() directly, so a mislabeled preset (CRITICAL BUG 2) can't recur silently.
+export const CIRCUIT_4LOOP: { A: number[][]; B: number[] } = {
   A: [
     [4, -1, 0, 0],
     [-1, 4, -1, 0],
@@ -36,14 +38,56 @@ const CIRCUIT_4LOOP: { A: number[][]; B: number[] } = {
   B: [34, 17, -26, 35],
 };
 
-const BLANK_4X4: { A: number[][]; B: number[] } = {
+// Replaces the old BLANK_4X4, which had det(A) = 0 and actually produced "no solution" while
+// labeled "ตัวอย่างทั่วไป (คำตอบเดียว)" (unique solution) — CRITICAL BUG 2. A is diagonally
+// dominant (|a_ii| > sum of other |a_ij| in each row), which guarantees det(A) != 0 by the
+// Levy-Desplanques theorem. Verified numerically (see matrixEngine.test.ts): det(A) = 1478,
+// solving A X = B returns exactly the target solution [2, -1, 3, -2].
+export const UNIQUE_4X4: { A: number[][]; B: number[] } = {
+  A: [
+    [5, 1, 1, 1],
+    [1, 6, 1, 1],
+    [1, 1, 7, 1],
+    [1, 1, 1, 8],
+  ],
+  B: [10, -3, 20, -12],
+};
+
+// Infinite-solutions example: row 3 = row 0 + row 1 in both A and B (a genuine linear
+// dependency), while rows 0-2 remain independent, so rank(A) = 3 < 4 with a consistent
+// system. Verified numerically (see matrixEngine.test.ts): det(A) = 0, RREF row R4 reduces
+// to all-zero coefficients AND a zero right-hand side (0 = 0) -> one free variable.
+export const INFINITE_4X4: { A: number[][]; B: number[] } = {
   A: [
     [1, 1, 1, 1],
     [2, -1, 1, 0],
-    [0, 1, -1, 2],
-    [1, 0, 2, -1],
+    [1, 2, -1, 1],
+    [3, 0, 2, 1],
   ],
-  B: [10, 3, 7, 4],
+  B: [10, 3, 4, 13],
+};
+
+// No-solution example: identical A to INFINITE_4X4 (same rank-3 dependency: row 3 = row 0 +
+// row 1), but B[3] is changed so the right-hand sides are NOT consistent with that dependency
+// (5 != B[0] + B[1] = 13). Verified numerically (see matrixEngine.test.ts): det(A) = 0, RREF
+// row R4 reduces to all-zero coefficients with a NONZERO right-hand side (0 = k) -> contradiction.
+export const NO_SOLUTION_4X4: { A: number[][]; B: number[] } = {
+  A: [
+    [1, 1, 1, 1],
+    [2, -1, 1, 0],
+    [1, 2, -1, 1],
+    [3, 0, 2, 1],
+  ],
+  B: [10, 3, 4, 5],
+};
+
+type PresetKey = 'circuit' | 'unique' | 'infinite' | 'no_solution';
+
+const PRESETS: Record<PresetKey, { A: number[][]; B: number[] }> = {
+  circuit: CIRCUIT_4LOOP,
+  unique: UNIQUE_4X4,
+  infinite: INFINITE_4X4,
+  no_solution: NO_SOLUTION_4X4,
 };
 
 export default function HigherOrderLab() {
@@ -55,7 +99,7 @@ export default function HigherOrderLab() {
   // are revealed one at a time via "ขั้นตอนถัดไป" rather than all at once, so the answer isn't
   // spoiled before the student has followed the reduction — see the redesign note below.
   const [revealedCount, setRevealedCount] = useState(0);
-  const [activePreset, setActivePreset] = useState<'circuit' | 'blank' | null>('circuit');
+  const [activePreset, setActivePreset] = useState<PresetKey | null>('circuit');
   const [progress, setProgress] = useState(loadStudentProgress);
   const [settings] = useState(loadTeacherSettings);
   // True only for the visit where the walkthrough XP was actually just granted — see
@@ -91,8 +135,8 @@ export default function HigherOrderLab() {
     }
   }, [isWalkthroughComplete, progress, settings.enableXp]);
 
-  const loadPreset = (preset: 'circuit' | 'blank') => {
-    const data = preset === 'circuit' ? CIRCUIT_4LOOP : BLANK_4X4;
+  const loadPreset = (preset: PresetKey) => {
+    const data = PRESETS[preset];
     setMatrixStrA(data.A.map((row) => row.map((v) => v.toString())));
     setVectorStrB(data.B.map((v) => v.toString()));
     setActivePreset(preset);
@@ -147,14 +191,34 @@ export default function HigherOrderLab() {
           ⚡ วงจรไฟฟ้า 4 ลูป (Kirchhoff)
         </button>
         <button
-          onClick={() => loadPreset('blank')}
+          onClick={() => loadPreset('unique')}
           className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
-            activePreset === 'blank'
+            activePreset === 'unique'
               ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
               : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
           }`}
         >
           ตัวอย่างทั่วไป (คำตอบเดียว)
+        </button>
+        <button
+          onClick={() => loadPreset('infinite')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+            activePreset === 'infinite'
+              ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          ∞ ตัวอย่างคำตอบไม่จำกัด
+        </button>
+        <button
+          onClick={() => loadPreset('no_solution')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+            activePreset === 'no_solution'
+              ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+          }`}
+        >
+          ✕ ตัวอย่างไม่มีคำตอบ
         </button>
       </div>
 
@@ -248,7 +312,7 @@ export default function HigherOrderLab() {
                   >
                     Step {gs.stepIndex}
                   </span>
-                  <span className="text-slate-500 font-medium">{gs.explanation}</span>
+                  <span className="text-slate-500 font-medium"><RenderTextWithMath text={gs.explanation} /></span>
                 </div>
                 <GaussStepDisplay step={gs} />
               </div>
@@ -271,44 +335,74 @@ export default function HigherOrderLab() {
         </div>
       )}
 
-      {/* Result summary — shown after the steps, not before, so the answer doesn't spoil the
-          walkthrough that leads to it. */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-        <h3 className="text-sm font-bold text-slate-800 mb-3">ผลลัพธ์และการวิเคราะห์ประเภทคำตอบ</h3>
-        {summary.type === 'unique' && summary.solution && (
-          <div className="flex items-start gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
-            <div className="text-xs text-emerald-900 space-y-1">
-              <p className="font-bold">มีคำตอบเดียว (Unique Solution)</p>
-              <p className="font-mono text-sm">
-                {VARS.map((v, i) => `${v} = ${formatFractionOrDec(summary.solution![i])}`).join(',  ')}
-              </p>
-              {summary.solution.some((v) => v < 0) && (
-                <p className="flex items-center gap-1.5 text-amber-700 pt-1">
-                  <AlertTriangle className="w-3.5 h-3.5" /> มีค่าติดลบอย่างน้อยหนึ่งตัว — ในบริบทวงจรไฟฟ้า
-                  หมายถึงกระแสไหลสวนทิศทางที่สมมติไว้ ไม่ใช่คำตอบที่ผิด
+      {/* Result summary — only rendered once the step-by-step walkthrough is fully revealed
+          (isWalkthroughComplete), so the answer never appears before or alongside the steps
+          that lead to it. Previously this box was unconditional and showed immediately on
+          page load, before the student had even opened the walkthrough — re-verified live in
+          the browser after this fix (not just via the test suite), since this is a
+          rendering-order/visibility issue a logic-level test can't catch. */}
+      {isWalkthroughComplete ? (
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+          <h3 className="text-sm font-bold text-slate-800 mb-3">ผลลัพธ์และการวิเคราะห์ประเภทคำตอบ</h3>
+          {summary.type === 'unique' && summary.solution && (
+            <div className="flex items-start gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+              <div className="text-xs text-emerald-900 space-y-1">
+                <p className="font-bold">มีคำตอบเดียว (Unique Solution)</p>
+                <p className="font-mono text-sm">
+                  {VARS.map((v, i) => `${v} = ${formatFractionOrDec(summary.solution![i])}`).join(',  ')}
                 </p>
-              )}
+                {summary.solution.some((v) => v < 0) && (
+                  <p className="flex items-center gap-1.5 text-amber-700 pt-1">
+                    <AlertTriangle className="w-3.5 h-3.5" /> มีค่าติดลบอย่างน้อยหนึ่งตัว — ในบริบทวงจรไฟฟ้า
+                    หมายถึงกระแสไหลสวนทิศทางที่สมมติไว้ ไม่ใช่คำตอบที่ผิด
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
-        )}
-        {summary.type === 'no_solution' && (
-          <div className="flex items-start gap-3 p-4 bg-rose-50 border border-rose-200 rounded-xl">
-            <XCircle className="w-5 h-5 text-rose-600 flex-shrink-0 mt-0.5" />
-            <p className="text-xs text-rose-900 font-bold">
-              ไม่มีคำตอบ (No Solution) — พบแถวขัดแย้งระหว่างการทำ Gaussian Elimination
-            </p>
-          </div>
-        )}
-        {summary.type === 'infinite_solutions' && (
-          <div className="flex items-start gap-3 p-4 bg-sky-50 border border-sky-200 rounded-xl">
-            <InfinityIcon className="w-5 h-5 text-sky-600 flex-shrink-0 mt-0.5" />
-            <p className="text-xs text-sky-900 font-bold">
-              มีคำตอบนับไม่ถ้วน (Infinite Solutions) — มีตัวแปรอิสระอย่างน้อยหนึ่งตัว
-            </p>
-          </div>
-        )}
-      </div>
+          )}
+          {summary.type === 'no_solution' && (
+            <div className="flex items-start gap-3 p-4 bg-rose-50 border border-rose-200 rounded-xl">
+              <XCircle className="w-5 h-5 text-rose-600 flex-shrink-0 mt-0.5" />
+              <div className="text-xs text-rose-900 space-y-1.5">
+                <p className="font-bold">ไม่มีคำตอบ (No Solution)</p>
+                <p className="leading-relaxed">
+                  ดูที่แถว{' '}
+                  {summary.zeroRowIndex !== undefined && (
+                    <strong className="font-mono">R{summary.zeroRowIndex + 1}</strong>
+                  )}{' '}
+                  ในเมทริกซ์ขั้นสุดท้าย (Step {gaussSteps.length}) ด้านบน — สัมประสิทธิ์ของ {VARS.join(', ')}{' '}
+                  ในแถวนี้เป็น 0 ทั้งหมด แต่ค่าทางขวามือ (คอลัมน์ B) กลับ<strong>ไม่เป็น 0</strong> ซึ่งแปลว่าแถวนี้กลายเป็น
+                  สมการ "0 = k" เมื่อ k ≠ 0 — เป็นข้อขัดแย้งที่เป็นไปไม่ได้ทางคณิตศาสตร์ จึงสรุปได้ว่าระบบสมการนี้ไม่มีชุดคำตอบใดที่สอดคล้องกับทุกสมการพร้อมกัน
+                </p>
+              </div>
+            </div>
+          )}
+          {summary.type === 'infinite_solutions' && (
+            <div className="flex items-start gap-3 p-4 bg-sky-50 border border-sky-200 rounded-xl">
+              <InfinityIcon className="w-5 h-5 text-sky-600 flex-shrink-0 mt-0.5" />
+              <div className="text-xs text-sky-900 space-y-1.5">
+                <p className="font-bold">มีคำตอบนับไม่ถ้วน (Infinite Solutions)</p>
+                <p className="leading-relaxed">
+                  ดูที่แถว{' '}
+                  {summary.zeroRowIndex !== undefined && (
+                    <strong className="font-mono">R{summary.zeroRowIndex + 1}</strong>
+                  )}{' '}
+                  ในเมทริกซ์ขั้นสุดท้าย (Step {gaussSteps.length}) ด้านบน — ทั้งสัมประสิทธิ์ของ {VARS.join(', ')}{' '}
+                  และค่าทางขวามือ (คอลัมน์ B) ในแถวนี้เป็น 0 ทั้งหมด (สมการ "0 = 0") แถวนี้ไม่ได้ให้ข้อมูลเพิ่มเติมใดๆ
+                  จึงเหลือตัวแปรอิสระอย่างน้อยหนึ่งตัวที่กำหนดค่าเองได้ (ให้เป็นพารามิเตอร์ t) แล้วแทนย้อนกลับหาตัวแปรที่เหลือ
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        showSteps && (
+          <p className="text-center text-xs text-slate-400 italic">
+            กดปุ่ม "ขั้นตอนถัดไป" จนครบทุกขั้นตอน เพื่อดูผลลัพธ์และการวิเคราะห์ประเภทคำตอบ
+          </p>
+        )
+      )}
 
       {/* Why Gauss only note */}
       <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 text-xs text-indigo-900 leading-relaxed flex gap-3">

@@ -295,30 +295,37 @@ export function solveLinearSystem(system: LinearSystem): SolutionSummary {
   const aug: Matrix = A.map((row, i) => [...row, B[i]]);
   const rrefMatrix = computeRREF(aug);
 
-  // Check for contradiction row like [0, 0, ... | k] where k != 0
+  // Check for a contradiction row [0, 0, ... | k] (k != 0, no_solution) or a free row
+  // [0, 0, ... | 0] (0 = 0, infinite_solutions) — track the first row index of each kind so
+  // callers can point the student at exactly where in the RREF to look.
   const n = A.length;
-  let isContradiction = false;
+  let contradictionRow = -1;
+  let freeRow = -1;
 
   for (let i = 0; i < n; i++) {
     const lhsZero = rrefMatrix[i].slice(0, n).every((val) => numToRational(val)[0] === 0);
+    if (!lhsZero) continue;
     const rhsNonZero = numToRational(rrefMatrix[i][n])[0] !== 0;
-    if (lhsZero && rhsNonZero) {
-      isContradiction = true;
-      break;
+    if (rhsNonZero) {
+      if (contradictionRow === -1) contradictionRow = i;
+    } else if (freeRow === -1) {
+      freeRow = i;
     }
   }
 
-  if (isContradiction) {
+  if (contradictionRow !== -1) {
     return {
       type: 'no_solution',
       determinant: 0,
-      explanation: 'det(A) = 0 และจากการคำนวณขั้นแถวย่อย เกิดข้อขัดแย้ง (เช่น 0 = k เมื่อ k ≠ 0) ทำให้ระบบสมการ "ไม่มีคำตอบ" (No Solution)',
+      explanation: `det(A) = 0 และจากการคำนวณขั้นแถวย่อย เกิดข้อขัดแย้งที่แถว R${contradictionRow + 1} (เช่น 0 = k เมื่อ k ≠ 0) ทำให้ระบบสมการ "ไม่มีคำตอบ" (No Solution)`,
+      zeroRowIndex: contradictionRow,
     };
   } else {
     return {
       type: 'infinite_solutions',
       determinant: 0,
-      explanation: 'det(A) = 0 และสมการมีความสัมพันธ์แบบสอดคล้องกัน ทำให้ระบบสมการมี "คำตอบไม่จำกัดจำนวน" (Infinitely Many Solutions)',
+      explanation: `det(A) = 0 และจากการคำนวณขั้นแถวย่อย พบแถว R${freeRow + 1} ที่กลายเป็น 0 = 0 ทั้งแถว ทำให้ระบบสมการมี "คำตอบไม่จำกัดจำนวน" (Infinitely Many Solutions)`,
+      zeroRowIndex: freeRow,
     };
   }
 }
@@ -664,7 +671,11 @@ export function getGaussSteps(system: LinearSystem): GaussStep[] {
         beforeMatrix: beforeMat,
         augmentedMatrix: afterMat,
         operationPerformed: opText,
-        explanation: `คูณแถว R${i + 1} ด้วย ${multLatex} เพื่อปรับให้ Pivot กลายเป็น 1`,
+        // multLatex is a raw LaTeX fragment (e.g. "\frac{1}{4}") embedded in otherwise-plain
+        // Thai prose — must be $...$-wrapped so RenderTextWithMath's delimiter-based splitter
+        // (used everywhere this explanation is rendered) recognizes it as math instead of
+        // showing the literal backslash command as text.
+        explanation: `คูณแถว R${i + 1} ด้วย $${multLatex}$ เพื่อปรับให้ Pivot กลายเป็น 1`,
         highlightRows: [i],
       });
     }

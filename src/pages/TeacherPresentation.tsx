@@ -4,7 +4,6 @@ import {
   ChevronLeft,
   RotateCcw,
   Eye,
-  Shuffle,
   HelpCircle,
   ListFilter,
   Radio,
@@ -29,6 +28,7 @@ import {
   DeterminantDisplay,
   VectorDisplay,
   MathView,
+  RenderTextWithMath,
   formatLatexFraction
 } from '../components/math/MathComponents';
 import { getTeacherClassCode } from '../lib/classroomSync';
@@ -572,13 +572,6 @@ export default function TeacherPresentation() {
             <option value="infinite_solutions">คำตอบนับไม่ถ้วน (Infinite)</option>
           </select>
         </div>
-
-        <button
-          onClick={() => handleGenerateSystem(dimension, genSolutionType, genDifficulty)}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-indigo-600/20 transition-colors"
-        >
-          <Shuffle className="w-4 h-4" /> สุ่มโจทย์ใหม่ในชั้นเรียน
-        </button>
       </div>
 
       {/* Main Projection Screen Canvas */}
@@ -733,7 +726,7 @@ export default function TeacherPresentation() {
                             </span>
                             ขั้นตอนที่ {3 + k}: การดำเนินการกับแถวที่ {k + 1} (Row Operation #{k + 1})
                           </h3>
-                          <span className="text-xs text-slate-400 font-sans">{opStep.explanation}</span>
+                          <span className="text-xs text-slate-400 font-sans"><RenderTextWithMath text={opStep.explanation} /></span>
                         </div>
 
                         {/* ONE HORIZONTAL ROW FOR BEFORE -> OPERATION -> AFTER */}

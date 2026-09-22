@@ -26,6 +26,9 @@ export interface SolutionSummary {
   determinant: number;
   explanation: string;
   verifications?: VerificationResult[];
+  // 0-indexed row (in the RREF of [A|B]) whose coefficients are all zero — the row that
+  // proves no_solution (0 = k, k != 0) or infinite_solutions (0 = 0). Undefined for 'unique'.
+  zeroRowIndex?: number;
 }
 
 export interface StepDetail {
