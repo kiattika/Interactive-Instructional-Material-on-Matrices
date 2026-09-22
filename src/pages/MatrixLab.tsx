@@ -33,6 +33,7 @@ import {
   Sparkles,
   ArrowRight,
   RotateCcw,
+  Undo2,
   BookOpen,
   Info,
   Check,
@@ -49,6 +50,14 @@ function buildManualOpLatex(opType: 'swap' | 'multiply' | 'add', row1: number, r
   if (opType === 'swap') return `R_{${r1}} \\leftrightarrow R_{${r2}}`;
   if (opType === 'multiply') return `R_{${r1}} \\rightarrow (${kStr})R_{${r1}}`;
   return `R_{${r1}} \\rightarrow R_{${r1}} + (${kStr})R_{${r2}}`;
+}
+
+// One entry in the manual-mode operation history — see manualHistory's doc comment below.
+interface ManualOpHistoryEntry {
+  beforeMatrix: (number | string)[][];
+  afterMatrix: (number | string)[][];
+  opLatex: string;
+  highlightRows: number[];
 }
 
 // RREF is unique for a given matrix regardless of which valid sequence of row operations reached
@@ -145,20 +154,16 @@ export default function MatrixLab() {
   // just plain numbers, since applyRowOperation() returns the same Rational-formatted shape as
   // getGaussSteps() (see GaussStepDisplay.tsx's doc comment on why that must never be re-run
   // through formatFractionOrDec, which expects a raw number).
-  const [manualAug, setManualAug] = useState<(number | string)[][] | null>(null);
+  //
+  // Every applied operation is kept (not just the latest), so the student can see the full
+  // sequence of steps they've taken so far and undo the most recent one to try a different
+  // Ri/Rj/k combination instead of restarting from scratch (see handleUndoManualOp).
+  const [manualHistory, setManualHistory] = useState<ManualOpHistoryEntry[]>([]);
   const [opType, setOpType] = useState<'swap' | 'multiply' | 'add'>('add');
   const [opRow1, setOpRow1] = useState<number>(1);
   const [opRow2, setOpRow2] = useState<number>(0);
   const [opK, setOpK] = useState<string>('-2');
   const [manualFeedback, setManualFeedback] = useState<{ isCorrect: boolean; message: string } | null>(null);
-  // The most recently applied manual operation's before-state + description, so the current
-  // step can be shown in the same before→operation→after visual as auto mode (GaussStepDisplay)
-  // instead of a single matrix. Cleared on reset; NOT cleared when a new op succeeds (each
-  // success replaces these with the new before/op, so the display always reflects the latest
-  // step) — only used while manualAug is non-null.
-  const [manualPrevAug, setManualPrevAug] = useState<(number | string)[][] | null>(null);
-  const [manualLastOpLatex, setManualLastOpLatex] = useState<string | null>(null);
-  const [manualLastHighlightRows, setManualLastHighlightRows] = useState<number[] | null>(null);
 
   const [progress, setProgress] = useState(loadStudentProgress);
   const [settings] = useState(loadTeacherSettings);
@@ -194,11 +199,8 @@ export default function MatrixLab() {
       ]);
       setVectorStrB(['6', '3', '2']);
     }
-    setManualAug(null);
+    setManualHistory([]);
     setManualFeedback(null);
-    setManualPrevAug(null);
-    setManualLastOpLatex(null);
-    setManualLastHighlightRows(null);
   };
 
   // Load Preset — either a plain numeric preset (PRESETS) or an applied-problem preset
@@ -218,11 +220,8 @@ export default function MatrixLab() {
       setMatrixStrA(p.A.map((r) => r.map((c) => c.toString())));
       setVectorStrB(p.B.map((c) => c.toString()));
     }
-    setManualAug(null);
+    setManualHistory([]);
     setManualFeedback(null);
-    setManualPrevAug(null);
-    setManualLastOpLatex(null);
-    setManualLastHighlightRows(null);
   };
 
   // Parse Numeric System
@@ -252,11 +251,12 @@ export default function MatrixLab() {
   const cramerData = useMemo(() => getCramerSteps(system), [system]);
   const gaussSteps = useMemo(() => getGaussSteps(system), [system]);
 
-  // Initial manual augmented matrix
+  // Current manual augmented matrix — the latest history entry's result, or the untouched
+  // starting matrix when no operation has been applied yet.
   const currentManualAug = useMemo<(number | string)[][]>(() => {
-    if (manualAug) return manualAug;
+    if (manualHistory.length > 0) return manualHistory[manualHistory.length - 1].afterMatrix;
     return system.A.map((r, i) => [...r, system.B[i]]);
-  }, [manualAug, system]);
+  }, [manualHistory, system]);
 
   // Handle Manual Row Operation
   const handleApplyManualOp = () => {
@@ -274,42 +274,55 @@ export default function MatrixLab() {
       return;
     }
 
-    setManualPrevAug(currentManualAug);
-    setManualLastOpLatex(buildManualOpLatex(opType, opRow1, opRow2, opK));
-    setManualLastHighlightRows(opType === 'multiply' ? [opRow1] : [opRow1, opRow2]);
-    setManualAug(res.newMatrix);
+    setManualHistory((h) => [
+      ...h,
+      {
+        beforeMatrix: currentManualAug,
+        afterMatrix: res.newMatrix,
+        opLatex: buildManualOpLatex(opType, opRow1, opRow2, opK),
+        highlightRows: opType === 'multiply' ? [opRow1] : [opRow1, opRow2],
+      },
+    ]);
     setManualFeedback({
       isCorrect: true,
       message: '✓ คำนวณถูกต้อง! เมทริกซ์แต่งเติมถูกปรับเปลี่ยนเรียบร้อย',
     });
   };
 
+  // Full reset — clears the entire operation history and starts over from the original matrix.
   const handleResetManualGauss = () => {
-    setManualAug(null);
+    setManualHistory([]);
     setManualFeedback(null);
-    setManualPrevAug(null);
-    setManualLastOpLatex(null);
-    setManualLastHighlightRows(null);
   };
 
-  // The current manual step, shown via the same before→operation→after visual as auto mode.
-  // Before any operation has been applied, this has no beforeMatrix — GaussStepDisplay renders
-  // just the starting matrix, same as gaussSteps' own Step 1.
-  const manualDisplayStep: GaussStep = useMemo(
-    () => ({
-      stepIndex: 0,
-      beforeMatrix: manualPrevAug ?? undefined,
-      augmentedMatrix: currentManualAug,
-      operationPerformed: manualLastOpLatex ?? undefined,
+  // Undo — removes only the most recent operation, restoring the matrix state to what it was
+  // right before that operation, so the student can try a different Ri/Rj/k combination instead
+  // of restarting the whole reduction from scratch.
+  const handleUndoManualOp = () => {
+    setManualHistory((h) => h.slice(0, -1));
+    setManualFeedback(null);
+  };
+
+  // Each history entry rendered as its own before→operation→after step, in the same visual as
+  // auto mode (GaussStepDisplay). When no operation has been applied yet, show a single
+  // "step 0" with just the starting matrix, same as gaussSteps' own Step 1.
+  const manualDisplaySteps: GaussStep[] = useMemo(() => {
+    if (manualHistory.length === 0) {
+      return [{ stepIndex: 0, augmentedMatrix: currentManualAug, explanation: '' }];
+    }
+    return manualHistory.map((entry, idx) => ({
+      stepIndex: idx + 1,
+      beforeMatrix: entry.beforeMatrix,
+      augmentedMatrix: entry.afterMatrix,
+      operationPerformed: entry.opLatex,
       explanation: '',
-      highlightRows: manualLastHighlightRows ?? undefined,
-    }),
-    [manualPrevAug, currentManualAug, manualLastOpLatex, manualLastHighlightRows]
-  );
+      highlightRows: entry.highlightRows,
+    }));
+  }, [manualHistory, currentManualAug]);
 
   const finalGaussStep = gaussSteps[gaussSteps.length - 1];
   const isManualGaussComplete =
-    manualAug !== null && !!finalGaussStep && augmentedMatricesEqual(currentManualAug, finalGaussStep.augmentedMatrix);
+    manualHistory.length > 0 && !!finalGaussStep && augmentedMatricesEqual(currentManualAug, finalGaussStep.augmentedMatrix);
 
   // The final-answer verification box only makes sense once the student has actually reached
   // the end of a step-by-step method — showing it unconditionally (the old behavior) let it
@@ -911,7 +924,7 @@ export default function MatrixLab() {
                           <span className="font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-100">
                             Step {gs.stepIndex}
                           </span>
-                          <span className="text-slate-500 font-medium">{gs.explanation}</span>
+                          <span className="text-slate-500 font-medium"><RenderTextWithMath text={gs.explanation} /></span>
                         </div>
                         <GaussStepDisplay step={gs} />
                       </div>
@@ -922,17 +935,39 @@ export default function MatrixLab() {
                   <div className="space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs">
                     <div className="flex items-center justify-between">
                       <h4 className="font-bold text-slate-800">เครื่องมือทดลองดำเนินการตามแถว (Elementary Row Operations)</h4>
-                      <button
-                        onClick={handleResetManualGauss}
-                        className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" /> รีเซ็ต
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={handleUndoManualOp}
+                          disabled={manualHistory.length === 0}
+                          className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-indigo-600"
+                        >
+                          <Undo2 className="w-3.5 h-3.5" /> ย้อนกลับ (Undo)
+                        </button>
+                        <button
+                          onClick={handleResetManualGauss}
+                          className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" /> รีเซ็ต
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Current step: before -> operation -> after (or just the starting matrix
-                        if no operation has been applied yet) */}
-                    <GaussStepDisplay step={manualDisplayStep} />
+                    {/* Full history of every operation applied so far this session, each as its
+                        own before -> operation -> after row (or just the starting matrix if no
+                        operation has been applied yet) — not just the latest one, so the student
+                        can see the whole sequence of steps they've taken. */}
+                    <div className="space-y-2">
+                      {manualDisplaySteps.map((step) => (
+                        <div key={step.stepIndex} className="space-y-1">
+                          {step.stepIndex > 0 && (
+                            <span className="font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-100 text-xs">
+                              ขั้นที่ {step.stepIndex}
+                            </span>
+                          )}
+                          <GaussStepDisplay step={step} />
+                        </div>
+                      ))}
+                    </div>
 
                     {isManualGaussComplete ? (
                       <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 font-bold text-center">

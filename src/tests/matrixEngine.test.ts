@@ -11,6 +11,7 @@ import {
   toFraction,
 } from '../lib/matrixEngine';
 import { LinearSystem } from '../types';
+import { CIRCUIT_4LOOP, UNIQUE_4X4, INFINITE_4X4, NO_SOLUTION_4X4 } from '../pages/HigherOrderLab';
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -180,6 +181,37 @@ function testAllCases() {
     variables: ['x', 'y', 'z', 'w'],
   };
   assert(solveLinearSystem(caseH).type === 'infinite_solutions', 'Case H (4x4) must detect Infinite Solutions');
+
+  // Cases I-L: HigherOrderLab.tsx's actual preset constants — verified directly against
+  // solveLinearSystem() so a mislabeled preset (CRITICAL BUG 2: "ตัวอย่างทั่วไป (คำตอบเดียว)"
+  // actually had det(A) = 0 and produced "no solution") can't recur silently. Any future edit
+  // to these presets that breaks their labeled solution type fails this test.
+  const circuitSystem: LinearSystem = { dimension: '4x4', A: CIRCUIT_4LOOP.A, B: CIRCUIT_4LOOP.B, variables: ['x', 'y', 'z', 'w'] };
+  const solCircuit = solveLinearSystem(circuitSystem);
+  assert(solCircuit.type === 'unique', 'Preset "วงจรไฟฟ้า 4 ลูป" must be unique solution');
+  assert(
+    [10, 6, -3, 8].every((v, i) => Math.abs(solCircuit.solution![i] - v) < 1e-4),
+    'Preset "วงจรไฟฟ้า 4 ลูป" solution must be [10, 6, -3, 8]'
+  );
+
+  const uniqueSystem: LinearSystem = { dimension: '4x4', A: UNIQUE_4X4.A, B: UNIQUE_4X4.B, variables: ['x', 'y', 'z', 'w'] };
+  const solUnique = solveLinearSystem(uniqueSystem);
+  assert(solUnique.type === 'unique', 'Preset "ตัวอย่างทั่วไป (คำตอบเดียว)" must be unique solution (CRITICAL BUG 2 regression guard)');
+  assert(Math.abs(solUnique.determinant) > 1e-9, 'Preset "ตัวอย่างทั่วไป (คำตอบเดียว)" must have det(A) != 0');
+  assert(
+    [2, -1, 3, -2].every((v, i) => Math.abs(solUnique.solution![i] - v) < 1e-4),
+    'Preset "ตัวอย่างทั่วไป (คำตอบเดียว)" solution must be [2, -1, 3, -2]'
+  );
+
+  const infiniteSystem: LinearSystem = { dimension: '4x4', A: INFINITE_4X4.A, B: INFINITE_4X4.B, variables: ['x', 'y', 'z', 'w'] };
+  const solInfinite = solveLinearSystem(infiniteSystem);
+  assert(solInfinite.type === 'infinite_solutions', 'Preset "ตัวอย่างคำตอบไม่จำกัด" must be infinite solutions');
+  assert(solInfinite.zeroRowIndex !== undefined, 'Preset "ตัวอย่างคำตอบไม่จำกัด" must report a zeroRowIndex');
+
+  const noSolutionSystem: LinearSystem = { dimension: '4x4', A: NO_SOLUTION_4X4.A, B: NO_SOLUTION_4X4.B, variables: ['x', 'y', 'z', 'w'] };
+  const solNoSolution = solveLinearSystem(noSolutionSystem);
+  assert(solNoSolution.type === 'no_solution', 'Preset "ตัวอย่างไม่มีคำตอบ" must be no solution');
+  assert(solNoSolution.zeroRowIndex !== undefined, 'Preset "ตัวอย่างไม่มีคำตอบ" must report a zeroRowIndex');
 
   console.log('\n==================================================');
   console.log('       ALL MATHEMATICAL QA TESTS PASSED!          ');

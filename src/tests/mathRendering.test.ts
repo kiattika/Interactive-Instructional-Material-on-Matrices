@@ -202,6 +202,23 @@ for (const { label, system } of gaussTestSystems) {
 }
 console.log(`✓ Swept ${gaussCellCount} Gaussian-elimination matrix cells for NaN/undefined formatting regressions`);
 
+// 8. Gaussian-elimination step EXPLANATIONS (getGaussSteps()'s explanation field) — this is the
+// SECOND occurrence of the raw-LaTeX-leak bug class on this exact codepath: section 6 above
+// was added after the first occurrence (a raw LaTeX fragment left unwrapped in
+// operationPerformed), and this bug recurred in the DIFFERENT sibling field "explanation" (the
+// scale-pivot step's "คูณแถว R1 ด้วย \frac{1}{4} ..." text, reported rendering with a literal
+// backslash in HigherOrderLab.tsx). explanation is $...$-delimited prose (unlike
+// operationPerformed's raw LaTeX), so it goes through checkString's real
+// preprocessMathText/splitParts pipeline, same as any other prose+math string in the app.
+let gaussExplanationStrings = 0;
+for (const { label, system } of gaussTestSystems) {
+  for (const step of getGaussSteps(system)) {
+    checkString(`gauss-${label}-step${step.stepIndex}-explanation`, step.explanation);
+    gaussExplanationStrings++;
+  }
+}
+console.log(`✓ Swept ${gaussExplanationStrings} Gaussian-elimination step explanations across ${gaussTestSystems.length} systems`);
+
 if (failed) {
   console.error('\n' + '='.repeat(50));
   console.error('  MATH RENDERING QA FAILED — SEE ❌ ABOVE');
