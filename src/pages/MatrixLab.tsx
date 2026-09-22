@@ -16,7 +16,7 @@ import {
   formatFractionOrDec,
 } from '../lib/matrixEngine';
 import { ENGINEERING_ICT_PROBLEMS } from '../lib/engineeringProblems';
-import { loadStudentProgress, saveStudentProgress, LAB_WALKTHROUGH_XP } from '../lib/learningStore';
+import { loadStudentProgress, saveStudentProgress, loadTeacherSettings, LAB_WALKTHROUGH_XP } from '../lib/learningStore';
 import { GeminiTutor } from '../components/GeminiTutor';
 import { GaussStepDisplay } from '../components/GaussStepDisplay';
 import {
@@ -161,6 +161,7 @@ export default function MatrixLab() {
   const [manualLastHighlightRows, setManualLastHighlightRows] = useState<number[] | null>(null);
 
   const [progress, setProgress] = useState(loadStudentProgress);
+  const [settings] = useState(loadTeacherSettings);
   // True only for the visit where the Gauss walkthrough XP was actually just granted — keeps
   // the completion banner from claiming "+15 XP!" again on every later visit to an
   // already-completed walkthrough.
@@ -322,15 +323,22 @@ export default function MatrixLab() {
 
   // One-time XP award for actually completing the manual walkthrough (reaching RREF), not just
   // opening the tab — see LAB_WALKTHROUGH_XP's doc comment in learningStore.ts for the scale
-  // reasoning, and StudentProgress.matrixLabGaussCompleted for the anti-farm flag.
+  // reasoning, and StudentProgress.matrixLabGaussCompleted for the anti-farm flag. The
+  // completed flag is still recorded even while XP is disabled (enableXp only pauses the
+  // increment, it never rewrites what a student has already accomplished), so re-enabling XP
+  // later doesn't retroactively pay out for a walkthrough finished while it was off.
   useEffect(() => {
     if (isManualGaussComplete && !progress.matrixLabGaussCompleted) {
-      const updated = { ...progress, xp: progress.xp + LAB_WALKTHROUGH_XP, matrixLabGaussCompleted: true };
+      const updated = {
+        ...progress,
+        xp: settings.enableXp ? progress.xp + LAB_WALKTHROUGH_XP : progress.xp,
+        matrixLabGaussCompleted: true
+      };
       saveStudentProgress(updated);
       setProgress(updated);
-      setJustEarnedLabXp(true);
+      if (settings.enableXp) setJustEarnedLabXp(true);
     }
-  }, [isManualGaussComplete, progress]);
+  }, [isManualGaussComplete, progress, settings.enableXp]);
 
   // Hints array
   const hintsList = [
@@ -422,10 +430,11 @@ export default function MatrixLab() {
         </div>
       )}
 
-      {/* Main Bento Layout: Left = Matrix Editor & Solvers, Right = Gemini AI Tutor */}
+      {/* Main Bento Layout: Left = Matrix Editor & Solvers, Right = Gemini AI Tutor (if enabled) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-grow overflow-hidden">
-        {/* Left Column (8 cols): Input Engine & Solver Tabs */}
-        <div className="lg:col-span-8 flex flex-col gap-4 overflow-y-auto pr-1">
+        {/* Left Column: Input Engine & Solver Tabs — takes the full width when the AI tutor is
+            disabled, since there's no right column to share it with. */}
+        <div className={`${settings.enableAiTutor ? 'lg:col-span-8' : 'lg:col-span-12'} flex flex-col gap-4 overflow-y-auto pr-1`}>
           {/* Matrix Input & Representation Bento Card */}
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
@@ -562,14 +571,16 @@ export default function MatrixLab() {
                   <Sparkles className="w-4 h-4 text-amber-600" />
                   คำถามกระตุ้นการคิด (Learning Mode)
                 </h4>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => setHintLevel((prev) => Math.min(prev + 1, hintsList.length))}
-                    className="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-800 text-[11px] font-bold rounded-lg border border-amber-300 transition-colors shadow-2xs"
-                  >
-                    💡 ขอคำใบ้ ({hintLevel}/{hintsList.length})
-                  </button>
-                </div>
+                {settings.enableHints && (
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => setHintLevel((prev) => Math.min(prev + 1, hintsList.length))}
+                      className="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-800 text-[11px] font-bold rounded-lg border border-amber-300 transition-colors shadow-2xs"
+                    >
+                      💡 ขอคำใบ้ ({hintLevel}/{hintsList.length})
+                    </button>
+                  </div>
+                )}
               </div>
 
               <p className="text-xs text-amber-900 font-medium mb-3">
@@ -1099,15 +1110,18 @@ export default function MatrixLab() {
           )}
         </div>
 
-        {/* Right Column (4 cols): Gemini AI Math Tutor */}
-        <div className="lg:col-span-4 h-full min-h-[500px]">
-          <GeminiTutor
-            system={system}
-            activeMethod={activeTab}
-            detA={summary.determinant}
-            solutionType={summary.type}
-          />
-        </div>
+        {/* Right Column (4 cols): Gemini AI Math Tutor — entry point hidden entirely (not just
+            disabled) when the teacher has turned off the AI tutor. */}
+        {settings.enableAiTutor && (
+          <div className="lg:col-span-4 h-full min-h-[500px]">
+            <GeminiTutor
+              system={system}
+              activeMethod={activeTab}
+              detA={summary.determinant}
+              solutionType={summary.type}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

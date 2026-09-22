@@ -36,6 +36,7 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
   const modeLabel = mode === 'pre' ? 'Pre-Test' : 'Post-Test';
 
   const [progress, setProgress] = useState<StudentProgress>(loadStudentProgress);
+  const [settings] = useState(loadTeacherSettings);
 
   // 18/20 questions across both banks had the correct answer hardcoded at option index 0 — see
   // shuffleOptions.ts. Seeded by studentId+questionId so it's stable for this student but
@@ -47,7 +48,7 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
       return { ...q, options, correctIndex };
     });
   }, [rawQuestions]);
-  const [masteryThreshold] = useState(() => loadTeacherSettings().masteryThreshold);
+  const masteryThreshold = settings.masteryThreshold;
   const [currentStep, setCurrentStep] = useState<'intro' | 'testing' | 'results'>('intro');
   const [userAnswers, setUserAnswers] = useState<Record<string, number>>({});
   const [qIndex, setQIndex] = useState(0);
@@ -113,14 +114,16 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
       const updatedProgress: StudentProgress = { ...progress };
       // Award the one-time completion XP BEFORE flipping *TestCompleted to true, so retaking
       // the test later (preTestCompleted/postTestCompleted already true) can't farm more XP.
+      // *TestCompleted itself is still recorded even while XP is disabled — enableXp only
+      // pauses the increment, never the underlying completion tracking.
       if (mode === 'pre') {
-        if (!updatedProgress.preTestCompleted) updatedProgress.xp += DIAGNOSTIC_TEST_XP;
+        if (!updatedProgress.preTestCompleted && settings.enableXp) updatedProgress.xp += DIAGNOSTIC_TEST_XP;
         updatedProgress.preTestCompleted = true;
         updatedProgress.preTestScore = finalPercent;
         updatedProgress.preTestAnswers = userAnswers;
         updatedProgress.preTestDate = new Date().toISOString();
       } else {
-        if (!updatedProgress.postTestCompleted) updatedProgress.xp += DIAGNOSTIC_TEST_XP;
+        if (!updatedProgress.postTestCompleted && settings.enableXp) updatedProgress.xp += DIAGNOSTIC_TEST_XP;
         updatedProgress.postTestCompleted = true;
         updatedProgress.postTestScore = finalPercent;
         updatedProgress.postTestAnswers = userAnswers;
@@ -187,7 +190,11 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
               onClick={handleStartTest}
               className="w-full mt-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition-colors"
             >
-              {isCompleted ? `ทำแบบทดสอบ ${modeLabel} อีกครั้ง` : `เริ่มทำ ${modeLabel} (+${DIAGNOSTIC_TEST_XP} XP)`}
+              {isCompleted
+                ? `ทำแบบทดสอบ ${modeLabel} อีกครั้ง`
+                : settings.enableXp
+                ? `เริ่มทำ ${modeLabel} (+${DIAGNOSTIC_TEST_XP} XP)`
+                : `เริ่มทำ ${modeLabel}`}
             </button>
           </div>
 

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Award, CheckCircle2, Download, Printer, Shield, Sparkles, X } from 'lucide-react';
-import { StudentProgress } from '../lib/learningStore';
+import { StudentProgress, CURRICULUM_LESSONS } from '../lib/learningStore';
 
 export interface BadgeInfo {
   id: string;
@@ -56,7 +56,7 @@ export const ALL_BADGES: BadgeInfo[] = [
     id: 'matrix_master',
     name: 'Matrix Master',
     thaiName: 'มหาบัณฑิตเมทริกซ์ (Matrix Master)',
-    description: 'สำเร็จหลักสูตรระบบสมการเชิงเส้นและเมทริกซ์ครบ 10 บทเรียน',
+    description: `สำเร็จหลักสูตรระบบสมการเชิงเส้นและเมทริกซ์ครบ ${CURRICULUM_LESSONS.length} บทเรียน`,
     icon: '🏆',
     category: 'completion'
   }
@@ -64,6 +64,11 @@ export const ALL_BADGES: BadgeInfo[] = [
 
 interface Props {
   progress: StudentProgress;
+  // Whether to show the XP / Badges stat cells — reflects the teacher's enableXp/enableBadges
+  // settings (see TeacherSettingsPage.tsx). Defaults to true so any other caller of this modal
+  // that doesn't pass them keeps the previous unconditional behavior.
+  showXp?: boolean;
+  showBadges?: boolean;
   onCloseCertificate?: () => void;
 }
 
@@ -103,7 +108,7 @@ export function BadgesList({ progress }: { progress: StudentProgress }) {
   );
 }
 
-export function CertificateModal({ progress, onCloseCertificate }: Props) {
+export function CertificateModal({ progress, showXp = true, showBadges = true, onCloseCertificate }: Props) {
   const [studentName, setStudentName] = useState(progress.studentName || 'นักเรียนใหม่');
   const [isEditingName, setIsEditingName] = useState(false);
 
@@ -197,20 +202,34 @@ export function CertificateModal({ progress, onCloseCertificate }: Props) {
               (Inverse Matrix, Cramer's Rule, and Gaussian Elimination)
             </p>
 
-            {/* Stats Badge Strip */}
-            <div className="grid grid-cols-3 gap-4 max-w-md mx-auto my-6 p-3 bg-slate-50 rounded-xl border border-slate-200">
-              <div>
-                <p className="text-[10px] text-slate-400 font-bold uppercase">คะแนนสะสม</p>
-                <p className="text-base font-black text-indigo-600">{progress.xp} XP</p>
-              </div>
+            {/* Stats Badge Strip — mastery is always shown; XP/Badges cells follow the
+                teacher's enableXp/enableBadges settings (see TeacherSettingsPage.tsx), same as
+                everywhere else those stats appear. */}
+            <div
+              className={`grid gap-4 max-w-md mx-auto my-6 p-3 bg-slate-50 rounded-xl border border-slate-200 ${
+                (showXp ? 1 : 0) + (showBadges ? 1 : 0) === 2
+                  ? 'grid-cols-3'
+                  : (showXp ? 1 : 0) + (showBadges ? 1 : 0) === 1
+                  ? 'grid-cols-2'
+                  : 'grid-cols-1'
+              }`}
+            >
+              {showXp && (
+                <div>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase">คะแนนสะสม</p>
+                  <p className="text-base font-black text-indigo-600">{progress.xp} XP</p>
+                </div>
+              )}
               <div>
                 <p className="text-[10px] text-slate-400 font-bold uppercase">ความเชี่ยวชาญรวม</p>
                 <p className="text-base font-black text-emerald-600">{averageMastery}%</p>
               </div>
-              <div>
-                <p className="text-[10px] text-slate-400 font-bold uppercase">ตราสัญลักษณ์</p>
-                <p className="text-base font-black text-amber-600">{progress.earnedBadges.length} Badges</p>
-              </div>
+              {showBadges && (
+                <div>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase">ตราสัญลักษณ์</p>
+                  <p className="text-base font-black text-amber-600">{progress.earnedBadges.length} Badges</p>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-between items-end mt-8 pt-6 border-t border-slate-200 px-6 text-left">

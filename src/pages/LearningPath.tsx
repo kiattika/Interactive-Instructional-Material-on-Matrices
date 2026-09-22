@@ -14,12 +14,14 @@ import {
 import {
   CURRICULUM_LESSONS,
   loadStudentProgress,
+  loadTeacherSettings,
   StudentProgress
 } from '../lib/learningStore';
-import { BadgesList, CertificateModal } from '../components/BadgesAndCertificate';
+import { BadgesList, CertificateModal, ALL_BADGES } from '../components/BadgesAndCertificate';
 
 export default function LearningPath() {
   const [progress] = useState<StudentProgress>(loadStudentProgress);
+  const [settings] = useState(loadTeacherSettings);
   const [showCertificate, setShowCertificate] = useState(false);
 
   const completedCount = progress.completedLessons.length;
@@ -87,11 +89,13 @@ export default function LearningPath() {
         </Link>
       </div>
 
-      {/* Curriculum Roadmap (10 Lessons Grid) */}
+      {/* Curriculum Roadmap */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-black text-slate-800">แผนผังบทเรียนทั้งหมด (10 Lessons)</h2>
-          {completedCount >= 10 && (
+          <h2 className="text-lg font-black text-slate-800">
+            แผนผังบทเรียนทั้งหมด ({CURRICULUM_LESSONS.length} Lessons)
+          </h2>
+          {completedCount >= CURRICULUM_LESSONS.length && (
             <button
               onClick={() => setShowCertificate(true)}
               className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl transition-colors flex items-center gap-2 shadow-sm"
@@ -167,23 +171,31 @@ export default function LearningPath() {
         </div>
       </div>
 
-      {/* Badges Earned Section */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-extrabold text-slate-800">เหรียญตราความสำเร็จ (Badges)</h3>
-            <p className="text-xs text-slate-500">ปลดล็อกเหรียญตราเมื่อผ่านหัวข้อการเรียนรู้ต่างๆ</p>
+      {/* Badges Earned Section — hidden entirely (not just disabled) when the teacher has
+          turned badges off. New badges also stop being awarded — see LessonView.tsx. */}
+      {settings.enableBadges && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-800">เหรียญตราความสำเร็จ (Badges)</h3>
+              <p className="text-xs text-slate-500">ปลดล็อกเหรียญตราเมื่อผ่านหัวข้อการเรียนรู้ต่างๆ</p>
+            </div>
+            <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">
+              {progress.earnedBadges.length} / {ALL_BADGES.length} Badges
+            </span>
           </div>
-          <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">
-            {progress.earnedBadges.length} / 6 Badges
-          </span>
+          <BadgesList progress={progress} />
         </div>
-        <BadgesList progress={progress} />
-      </div>
+      )}
 
       {/* Certificate Modal */}
       {showCertificate && (
-        <CertificateModal progress={progress} onCloseCertificate={() => setShowCertificate(false)} />
+        <CertificateModal
+          progress={progress}
+          showXp={settings.enableXp}
+          showBadges={settings.enableBadges}
+          onCloseCertificate={() => setShowCertificate(false)}
+        />
       )}
     </div>
   );

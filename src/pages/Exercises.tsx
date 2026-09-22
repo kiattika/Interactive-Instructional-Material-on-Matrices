@@ -4,6 +4,7 @@ import { ENGINEERING_ICT_PROBLEMS } from '../lib/engineeringProblems';
 import {
   loadStudentProgress,
   saveStudentProgress,
+  loadTeacherSettings,
   StudentProgress,
   CHECK_QUESTION_CORRECT_XP
 } from '../lib/learningStore';
@@ -26,6 +27,7 @@ export default function Exercises() {
   const [submitted, setSubmitted] = useState<Record<string, boolean>>({});
   const [hintsVisible, setHintsVisible] = useState<Record<string, number>>({});
   const [progress, setProgress] = useState<StudentProgress>(loadStudentProgress);
+  const [settings] = useState(loadTeacherSettings);
   // Tracks which questions actually granted fresh XP on submit, so the feedback message
   // doesn't claim "+XP" again for a question already awarded in an earlier visit.
   const [xpGranted, setXpGranted] = useState<Record<string, boolean>>({});
@@ -71,7 +73,7 @@ export default function Exercises() {
 
     const q = questions.find((item) => item.id === qId);
     const xpKey = `mcq-${qId}`;
-    if (q && userAnswers[qId] === q.correctAnswer && !progress.checkQuestionXpAwarded.includes(xpKey)) {
+    if (q && userAnswers[qId] === q.correctAnswer && settings.enableXp && !progress.checkQuestionXpAwarded.includes(xpKey)) {
       const updatedProgress: StudentProgress = {
         ...progress,
         xp: progress.xp + CHECK_QUESTION_CORRECT_XP,
@@ -104,19 +106,23 @@ export default function Exercises() {
         <div>
           <h2 className="text-2xl font-bold text-slate-800">ระบบแบบฝึกหัดทบทวน (Matrix Practice)</h2>
           <p className="text-sm text-slate-500 mt-1">
-            ฝึกสุ่มแก้โจทย์ ตรวจคำตอบอัตโนมัติ และสะสมคะแนน XP
+            {settings.enableXp
+              ? 'ฝึกสุ่มแก้โจทย์ ตรวจคำตอบอัตโนมัติ และสะสมคะแนน XP'
+              : 'ฝึกสุ่มแก้โจทย์และตรวจคำตอบอัตโนมัติ'}
           </p>
         </div>
 
-        <div className="flex items-center gap-4 bg-indigo-50 border border-indigo-100 p-3 rounded-xl">
-          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-sm">
-            <Trophy className="w-5 h-5" />
+        {settings.enableXp && (
+          <div className="flex items-center gap-4 bg-indigo-50 border border-indigo-100 p-3 rounded-xl">
+            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-sm">
+              <Trophy className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-[10px] uppercase font-bold text-indigo-400">Total XP Score</p>
+              <p className="text-xl font-black text-indigo-900">{progress.xp} XP</p>
+            </div>
           </div>
-          <div>
-            <p className="text-[10px] uppercase font-bold text-indigo-400">Total XP Score</p>
-            <p className="text-xl font-black text-indigo-900">{progress.xp} XP</p>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Mode Tabs: MCQ vs Applied Engineering/ICT Problems */}
@@ -197,12 +203,14 @@ export default function Exercises() {
                   <span className="text-xs font-semibold text-slate-700">{q.title}</span>
                 </div>
 
-                <button
-                  onClick={() => handleToggleHint(q.id)}
-                  className="text-amber-600 hover:text-amber-800 text-xs font-bold flex items-center gap-1 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200"
-                >
-                  💡 คำใบ้ ({currentHintLevel}/3)
-                </button>
+                {settings.enableHints && (
+                  <button
+                    onClick={() => handleToggleHint(q.id)}
+                    className="text-amber-600 hover:text-amber-800 text-xs font-bold flex items-center gap-1 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200"
+                  >
+                    💡 คำใบ้ ({currentHintLevel}/3)
+                  </button>
+                )}
               </div>
 
               {/* Question Body */}

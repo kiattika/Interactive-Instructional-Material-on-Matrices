@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { LinearSystem } from '../types';
 import { det, solveLinearSystem, getGaussSteps, formatFractionOrDec } from '../lib/matrixEngine';
-import { loadStudentProgress, saveStudentProgress, LAB_WALKTHROUGH_XP } from '../lib/learningStore';
+import { loadStudentProgress, saveStudentProgress, loadTeacherSettings, LAB_WALKTHROUGH_XP } from '../lib/learningStore';
 import { RenderTextWithMath } from '../components/math/MathComponents';
 import { GaussStepDisplay } from '../components/GaussStepDisplay';
 import {
@@ -57,6 +57,7 @@ export default function HigherOrderLab() {
   const [revealedCount, setRevealedCount] = useState(0);
   const [activePreset, setActivePreset] = useState<'circuit' | 'blank' | null>('circuit');
   const [progress, setProgress] = useState(loadStudentProgress);
+  const [settings] = useState(loadTeacherSettings);
   // True only for the visit where the walkthrough XP was actually just granted — see
   // MatrixLab.tsx's identical justEarnedLabXp for why (never re-claim XP on a later revisit).
   const [justEarnedLabXp, setJustEarnedLabXp] = useState(false);
@@ -79,12 +80,16 @@ export default function HigherOrderLab() {
   // MatrixLab's matrixLabGaussCompleted so completing both labs credits both).
   useEffect(() => {
     if (isWalkthroughComplete && !progress.higherOrderLabCompleted) {
-      const updated = { ...progress, xp: progress.xp + LAB_WALKTHROUGH_XP, higherOrderLabCompleted: true };
+      const updated = {
+        ...progress,
+        xp: settings.enableXp ? progress.xp + LAB_WALKTHROUGH_XP : progress.xp,
+        higherOrderLabCompleted: true
+      };
       saveStudentProgress(updated);
       setProgress(updated);
-      setJustEarnedLabXp(true);
+      if (settings.enableXp) setJustEarnedLabXp(true);
     }
-  }, [isWalkthroughComplete, progress]);
+  }, [isWalkthroughComplete, progress, settings.enableXp]);
 
   const loadPreset = (preset: 'circuit' | 'blank') => {
     const data = preset === 'circuit' ? CIRCUIT_4LOOP : BLANK_4X4;
