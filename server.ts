@@ -3,7 +3,7 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { TOPIC_LABELS, TOPIC_DIMENSIONS, isTopicKey } from './src/lib/topics';
 import { SyncedProgress } from './src/lib/classroomStore';
 import {
@@ -40,7 +40,10 @@ const aiRateLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => {
     const studentId = typeof req.body?.studentId === 'string' ? req.body.studentId : null;
-    return studentId || req.ip || 'unknown';
+    // req.ip must go through ipKeyGenerator so IPv6 addresses are normalized to a /56 subnet
+    // instead of keyed per-address (see ERR_ERL_KEY_GEN_IPV6) — otherwise an IPv6 client could
+    // cycle through addresses within its own subnet to dodge this cap entirely.
+    return studentId || ipKeyGenerator(req.ip || 'unknown');
   },
   handler: (_req, res) => {
     const message = 'ใช้งานถี่เกินไปในช่วงเวลานี้ โปรดรอสักครู่แล้วลองใหม่อีกครั้งครับ';
