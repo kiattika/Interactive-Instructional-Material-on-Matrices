@@ -1,0 +1,153 @@
+{
+  "entities": {
+    "Classroom": {
+      "title": "Classroom",
+      "description": "Class session with active status and optional teacher note",
+      "type": "object",
+      "properties": {
+        "classCode": {
+          "type": "string",
+          "description": "6-character unique class code"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp of creation"
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Whether the class is open for student joins and syncing"
+        },
+        "note": {
+          "type": "string",
+          "description": "Optional teacher note such as grade or section"
+        }
+      },
+      "required": ["classCode", "createdAt", "active"]
+    },
+    "StudentRecord": {
+      "title": "StudentRecord",
+      "description": "Student progress record and roster entry",
+      "type": "object",
+      "properties": {
+        "studentId": {
+          "type": "string",
+          "description": "Unique student identifier"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Student display name"
+        },
+        "lastSyncedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp of the most recent progress sync"
+        },
+        "progress": {
+          "type": "object",
+          "description": "Student learning progress, badges, test scores, and topic mastery"
+        }
+      },
+      "required": ["studentId", "displayName", "lastSyncedAt", "progress"]
+    },
+    "LivePoll": {
+      "title": "LivePoll",
+      "description": "Live classroom poll and interactive quiz question",
+      "type": "object",
+      "properties": {
+        "pollId": {
+          "type": "string",
+          "description": "Unique poll identifier"
+        },
+        "classCode": {
+          "type": "string",
+          "description": "Associated class code"
+        },
+        "question": {
+          "type": "string",
+          "description": "Poll question text"
+        },
+        "options": {
+          "type": "array",
+          "description": "Multiple choice options"
+        },
+        "correctAnswer": {
+          "type": "string",
+          "description": "Correct choice option"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["open", "closed"],
+          "description": "Current status of the poll"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp when created"
+        },
+        "closedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp when closed"
+        }
+      },
+      "required": ["pollId", "classCode", "question", "options", "correctAnswer", "status", "createdAt"]
+    },
+    "PollAnswer": {
+      "title": "PollAnswer",
+      "description": "Student response to a live poll",
+      "type": "object",
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "description": "Display name of answering student"
+        },
+        "selectedOption": {
+          "type": "string",
+          "description": "Selected option"
+        },
+        "answeredAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp of the answer submission"
+        }
+      },
+      "required": ["displayName", "selectedOption", "answeredAt"]
+    },
+    "PollAwardAck": {
+      "title": "PollAwardAck",
+      "description": "Marker document acknowledging student award for poll completion",
+      "type": "object",
+      "properties": {
+        "acknowledgedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp when award was pulled and acknowledged"
+        }
+      },
+      "required": ["acknowledgedAt"]
+    }
+  },
+  "firestore": {
+    "/classes/{classCode}": {
+      "schema": "Classroom",
+      "description": "Class session document"
+    },
+    "/classes/{classCode}/students/{studentId}": {
+      "schema": "StudentRecord",
+      "description": "Student progress record in the class roster"
+    },
+    "/livePolls/{pollId}": {
+      "schema": "LivePoll",
+      "description": "Live poll document"
+    },
+    "/livePolls/{pollId}/answers/{studentId}": {
+      "schema": "PollAnswer",
+      "description": "Student submitted response to a poll"
+    },
+    "/livePolls/{pollId}/acknowledgedAwards/{studentId}": {
+      "schema": "PollAwardAck",
+      "description": "Marker document for student reward acknowledgment"
+    }
+  }
+}
