@@ -1,6 +1,7 @@
 import React from 'react';
 import { GaussStep } from '../types';
-import { AugmentedMatrixDisplay } from './math/MathComponents';
+import { ArrowDown } from 'lucide-react';
+import { AugmentedMatrixDisplay, MathView } from './math/MathComponents';
 
 interface GaussStepDisplayProps {
   step: GaussStep;
@@ -39,7 +40,7 @@ export const GaussStepDisplay: React.FC<GaussStepDisplayProps> = ({ step, classN
     // descriptive Thai prose ("เริ่มสร้าง Augmented Matrix..."), not a LaTeX fragment, so it's
     // never fed through AugmentedMatrixDisplay/KaTeX.
     return (
-      <div className={`flex justify-center py-2 overflow-x-auto ${className}`}>
+      <div className={`flex justify-center-safe py-2 overflow-x-auto ${className}`}>
         <AugmentedMatrixDisplay A={after.A} B={after.B} highlightRows={step.highlightRows} />
       </div>
     );
@@ -47,15 +48,32 @@ export const GaussStepDisplay: React.FC<GaussStepDisplayProps> = ({ step, classN
 
   const before = splitAugmented(step.beforeMatrix);
 
+  // Below md the three parts stack vertically, with the operation on its own full-size line:
+  // side by side, \xrightarrow{op} made the after-matrix wider than a phone screen (forcing a
+  // horizontal scroll per step) and typeset the operation at script size, i.e. illegibly small
+  // exactly where the student most needs to read it. From md up the original inline-arrow
+  // notation is kept. *-center-safe alignment: anything still too wide scrolls rather than
+  // being clipped on its left edge by centering.
   return (
-    <div className={`flex flex-col md:flex-row items-center justify-center gap-4 py-2 overflow-x-auto ${className}`}>
+    <div
+      className={`flex flex-col md:flex-row items-center-safe justify-center-safe gap-2 md:gap-4 py-2 overflow-x-auto ${className}`}
+    >
       <AugmentedMatrixDisplay A={before.A} B={before.B} highlightRows={step.highlightRows} />
-      <AugmentedMatrixDisplay
-        A={after.A}
-        B={after.B}
-        rowOperation={step.operationPerformed}
-        highlightRows={step.highlightRows}
-      />
+      <div className="md:hidden flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-800">
+        <ArrowDown className="w-4 h-4 flex-shrink-0" />
+        <MathView latex={step.operationPerformed} className="text-base font-bold" />
+      </div>
+      <div className="md:hidden max-w-full">
+        <AugmentedMatrixDisplay A={after.A} B={after.B} highlightRows={step.highlightRows} />
+      </div>
+      <div className="hidden md:block">
+        <AugmentedMatrixDisplay
+          A={after.A}
+          B={after.B}
+          rowOperation={step.operationPerformed}
+          highlightRows={step.highlightRows}
+        />
+      </div>
     </div>
   );
 };

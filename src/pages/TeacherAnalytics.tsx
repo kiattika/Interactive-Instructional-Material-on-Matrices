@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { loadTeacherSettings, TeacherSettings } from '../lib/learningStore';
 import type { StudentRecord, ClassSummary } from '../lib/classroomStore';
 import { StudentRosterRow } from '../components/StudentRosterRow';
+import { SurveyResultsPanel } from '../components/SurveyResultsPanel';
 import { cn } from '../lib/utils';
 
 export default function TeacherAnalytics() {
@@ -16,6 +17,9 @@ export default function TeacherAnalytics() {
   const [classesLoading, setClassesLoading] = useState(false);
   const [classesError, setClassesError] = useState<string | null>(null);
   const [classCode, setClassCode] = useState<string | null>(null);
+  // "All classrooms combined" scope for the aggregate panels (survey results, efficiency stats).
+  // The per-student roster always needs one specific class, so it keeps using classCode.
+  const [showAllClasses, setShowAllClasses] = useState(false);
   const [roster, setRoster] = useState<StudentRecord[] | null>(null);
   const [rosterLoading, setRosterLoading] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
@@ -66,6 +70,12 @@ export default function TeacherAnalytics() {
   }, [classCode]);
 
   const currentClass = allClasses?.find((c) => c.classCode === classCode) || null;
+  // Scope for the aggregate panels: null = every classroom combined.
+  const aggregateClassCode = showAllClasses ? null : classCode;
+  const aggregateScopeLabel =
+    aggregateClassCode === null
+      ? 'ภาพรวมผู้เรียนทุกห้องเรียน'
+      : `ห้อง ${aggregateClassCode}${currentClass?.note ? ` (${currentClass.note})` : ''}`;
 
   return (
     <div className="space-y-6 pb-12">
@@ -88,13 +98,27 @@ export default function TeacherAnalytics() {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-wrap items-center gap-3">
           <span className="text-xs font-bold text-slate-500 flex-shrink-0">เลือกห้องเรียน:</span>
           <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setShowAllClasses(true)}
+              className={cn(
+                'px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors',
+                showAllClasses
+                  ? 'bg-slate-900 border-slate-900 text-white shadow-sm'
+                  : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'
+              )}
+            >
+              ทุกห้องเรียน (ภาพรวม)
+            </button>
             {allClasses.map((cls) => (
               <button
                 key={cls.classCode}
-                onClick={() => setClassCode(cls.classCode)}
+                onClick={() => {
+                  setClassCode(cls.classCode);
+                  setShowAllClasses(false);
+                }}
                 className={cn(
                   'px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors',
-                  classCode === cls.classCode
+                  !showAllClasses && classCode === cls.classCode
                     ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
                     : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'
                 )}
@@ -137,7 +161,7 @@ export default function TeacherAnalytics() {
         <div className="flex items-center justify-between flex-wrap gap-3">
           <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
             <Users className="w-5 h-5 text-indigo-600" /> รายชื่อและความก้าวหน้านักเรียน
-            {currentClass && (
+            {currentClass && !showAllClasses && (
               <span className="text-xs font-bold text-indigo-500">
                 — {currentClass.classCode}
                 {currentClass.note ? ` (${currentClass.note})` : ''}
@@ -155,7 +179,11 @@ export default function TeacherAnalytics() {
           )}
         </div>
 
-        {classesLoading && !allClasses ? (
+        {showAllClasses ? (
+          <p className="text-xs text-slate-500 leading-relaxed">
+            รายชื่อรายคนแสดงทีละห้องเรียน — เลือกห้องเรียนด้านบนเพื่อดูรายชื่อ (ส่วนสรุปผลอื่นในหน้านี้แสดงภาพรวมทุกห้องเรียนอยู่)
+          </p>
+        ) : classesLoading && !allClasses ? (
           <p className="text-xs text-slate-400 font-medium">กำลังโหลดรายชื่อห้องเรียน...</p>
         ) : !classCode ? (
           <div className="flex items-start gap-3">
@@ -201,6 +229,9 @@ export default function TeacherAnalytics() {
           </>
         )}
       </div>
+
+      {/* Anonymous post-course satisfaction survey — aggregates only (see lib/surveyStore.ts). */}
+      <SurveyResultsPanel classCode={aggregateClassCode} scopeLabel={aggregateScopeLabel} />
     </div>
   );
 }

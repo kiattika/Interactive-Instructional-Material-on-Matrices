@@ -8,3 +8,13 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 );
+
+// Installability only — public/sw.js is a pass-through worker with no caching (see its header).
+// Registered after load so it never competes with the app's first render.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // Non-fatal: the app works identically without it, it just isn't installable.
+    });
+  });
+}

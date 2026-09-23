@@ -54,7 +54,7 @@ export default function LearningPath() {
             {progressPercent}%
           </div>
           <div>
-            <p className="text-[10px] font-bold text-indigo-200 uppercase tracking-wider">ความก้าวหน้าหลักสูตร</p>
+            <p className="text-xs sm:text-[10px] font-bold text-indigo-200 uppercase tracking-wider">ความก้าวหน้าหลักสูตร</p>
             <p className="text-sm font-extrabold text-white">เรียนไปแล้ว {completedCount} / {CURRICULUM_LESSONS.length} บทเรียน</p>
             <div className="w-32 h-2 bg-white/20 rounded-full mt-2 overflow-hidden">
               <div
@@ -74,7 +74,7 @@ export default function LearningPath() {
             <Target className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-[10px] font-extrabold text-indigo-600 uppercase tracking-widest">
+            <span className="text-xs sm:text-[10px] font-extrabold text-indigo-600 uppercase tracking-widest">
               บทเรียนแนะนำถัดไป
             </span>
             <h3 className="text-lg font-black text-slate-800">{nextLesson.title}</h3>
@@ -83,7 +83,7 @@ export default function LearningPath() {
         </div>
         <Link
           to={`/learning/lesson/${nextLesson.id}`}
-          className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 flex-shrink-0"
+          className="w-full sm:w-auto px-6 py-3 min-h-11 sm:min-h-0 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 flex-shrink-0"
         >
           <Play className="w-4 h-4 fill-white" /> เริ่มเรียนบทเรียนนี้
         </Link>
@@ -98,7 +98,7 @@ export default function LearningPath() {
           {completedCount >= CURRICULUM_LESSONS.length && (
             <button
               onClick={() => setShowCertificate(true)}
-              className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl transition-colors flex items-center gap-2 shadow-sm"
+              className="px-4 py-2 min-h-11 sm:min-h-0 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl transition-colors flex items-center gap-2 shadow-sm"
             >
               <Award className="w-4 h-4" /> รับเกียรติบัตรเรียนจบหลักสูตร
             </button>
@@ -144,7 +144,7 @@ export default function LearningPath() {
                   </div>
 
                   {hasUnmetPrereq && !isCompleted && (
-                    <span className="p-1.5 bg-amber-100 text-amber-700 rounded-lg text-[10px] font-bold flex items-center gap-1 flex-shrink-0">
+                    <span className="p-1.5 bg-amber-100 text-amber-700 rounded-lg text-xs sm:text-[10px] font-bold flex items-center gap-1 flex-shrink-0">
                       <Lock className="w-3 h-3" /> แนะนำทบทวนก่อน
                     </span>
                   )}
@@ -154,7 +154,7 @@ export default function LearningPath() {
                   <span className="text-slate-400 font-medium">~{lesson.estimatedMinutes} นาที</span>
                   <Link
                     to={`/learning/lesson/${lesson.id}`}
-                    className={`font-bold px-4 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                    className={`font-bold px-4 py-1.5 min-h-11 sm:min-h-0 rounded-lg transition-colors flex items-center gap-1.5 ${
                       isCompleted
                         ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
                         : isNext

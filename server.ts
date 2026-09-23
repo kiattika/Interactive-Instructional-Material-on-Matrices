@@ -26,6 +26,8 @@ import {
   acknowledgePoll
 } from './server/livePollFileStore';
 import { LIVE_POLL_CORRECT_XP } from './src/lib/livePollStore';
+import { submitSurveyResponse, fetchSurveyResponses } from './server/surveyFileStore';
+import { validateSurveySubmission, aggregateSurveyResponses, SurveyResponse } from './src/lib/surveyStore';
 
 dotenv.config();
 
@@ -468,6 +470,46 @@ ${SOCRATIC_GROUND_RULES}
     } catch (error) {
       console.error('Failed to acknowledge live poll award:', error);
       return res.status(500).json({ error: 'ไม่สามารถบันทึกการรับรางวัลได้ในขณะนี้' });
+    }
+  });
+
+  // --- Anonymous satisfaction survey (แบบประเมินความพึงพอใจ, after the Post-Test) ---
+  // Responses carry no student identity by design — see src/lib/surveyStore.ts. The body is
+  // rebuilt from whitelisted fields before storage, so an identity field sent by a modified
+  // client is dropped, never saved. Same client-side-only teacher gate as the routes above.
+
+  app.post('/api/survey', async (req, res) => {
+    try {
+      const validation = validateSurveySubmission(req.body);
+      if (!validation.ok) {
+        const failure = validation as { ok: false; error: string };
+        return res.status(400).json({ error: failure.error === 'comment_too_long' ? 'ข้อเสนอแนะยาวเกินไป' : 'ข้อมูลแบบประเมินไม่ครบถ้วน' });
+      }
+      const { response } = validation as { ok: true; response: SurveyResponse };
+      // Read-only check against classes/ — responses are only accepted for a real, active class.
+      if (!(await isClassUsable(response.classCode))) {
+        return res.status(404).json({ error: 'ไม่พบรหัสห้องเรียนนี้ หรือห้องเรียนถูกปิดแล้ว' });
+      }
+      await submitSurveyResponse(response);
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('Failed to submit survey response:', error);
+      return res.status(500).json({ error: 'ไม่สามารถส่งแบบประเมินได้ในขณะนี้' });
+    }
+  });
+
+  // Aggregates only (n, per-question mean/SD, comment text) — never raw responses or timestamps.
+  // ?classCode=XXXX for one classroom; omit it for all classrooms combined.
+  app.get('/api/survey/results', async (req, res) => {
+    try {
+      const classCode = typeof req.query.classCode === 'string' && req.query.classCode.trim()
+        ? req.query.classCode.trim().toUpperCase()
+        : undefined;
+      const responses = await fetchSurveyResponses(classCode);
+      return res.json(aggregateSurveyResponses(responses));
+    } catch (error) {
+      console.error('Failed to fetch survey results:', error);
+      return res.status(500).json({ error: 'ไม่สามารถดึงผลแบบประเมินได้ในขณะนี้' });
     }
   });
 

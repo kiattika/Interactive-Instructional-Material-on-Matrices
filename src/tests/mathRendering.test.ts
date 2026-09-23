@@ -84,7 +84,10 @@ for (const lesson of CURRICULUM_LESSONS) {
     checkString(`lesson${lesson.id}-checkq`, q.question);
     checkString(`lesson${lesson.id}-checkq-explanation`, q.explanation);
     for (const opt of q.options) checkString(`lesson${lesson.id}-checkq-option`, opt);
-    lessonStrings += 2 + q.options.length;
+    // Per-option "why wrong" feedback shown after a first wrong pick (null at the answer).
+    const whys = q.whyWrong.filter((w): w is string => w !== null);
+    for (const w of whys) checkString(`lesson${lesson.id}-checkq-whyWrong`, w);
+    lessonStrings += 2 + q.options.length + whys.length;
   }
 }
 console.log(`✓ Swept ${lessonStrings} lesson strings across ${CURRICULUM_LESSONS.length} lessons`);
@@ -107,7 +110,9 @@ for (const q of generateExercises()) {
   checkString(`mcq-${q.id}-explanation`, q.explanation);
   for (const opt of q.options || []) checkString(`mcq-${q.id}-option`, opt);
   for (const h of q.hints) checkString(`mcq-${q.id}-hint`, h);
-  mcqStrings += 2 + (q.options?.length || 0) + q.hints.length;
+  const feedback = Object.values(q.optionFeedback || {});
+  for (const f of feedback) checkString(`mcq-${q.id}-optionFeedback`, f);
+  mcqStrings += 2 + (q.options?.length || 0) + q.hints.length + feedback.length;
 }
 console.log(`✓ Swept ${mcqStrings} MCQ exercise strings`);
 

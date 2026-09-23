@@ -6,10 +6,12 @@ import {
   saveStudentProgress,
   loadTeacherSettings,
   StudentProgress,
-  CHECK_QUESTION_CORRECT_XP
+  CHECK_QUESTION_SECOND_TRY_XP
 } from '../lib/learningStore';
+import { resolveCheckAttempt } from '../lib/checkAttempts';
 import { shuffleOptionsByValue } from '../lib/shuffleOptions';
 import { getStudentId } from '../lib/classroomSync';
+import { withActivity } from '../lib/motivation';
 import { ExerciseQuestion, ApplicationField } from '../types';
 import { CheckCircle2, XCircle, HelpCircle, Trophy, Sparkles, RefreshCw, Award, Cpu, Cog, Eye, Lightbulb } from 'lucide-react';
 import { RenderTextWithMath } from '../components/math/MathComponents';
@@ -28,9 +30,12 @@ export default function Exercises() {
   const [hintsVisible, setHintsVisible] = useState<Record<string, number>>({});
   const [progress, setProgress] = useState<StudentProgress>(loadStudentProgress);
   const [settings] = useState(loadTeacherSettings);
-  // Tracks which questions actually granted fresh XP on submit, so the feedback message
-  // doesn't claim "+XP" again for a question already awarded in an earlier visit.
-  const [xpGranted, setXpGranted] = useState<Record<string, boolean>>({});
+  // XP actually granted per question on its settling submit (0 when already settled in an earlier
+  // visit), so the feedback message never claims XP that wasn't paid.
+  const [xpGranted, setXpGranted] = useState<Record<string, number>>({});
+  // Wrong options submitted so far per question this sitting (two-strike flow, see
+  // lib/checkAttempts.ts). submitted[q] means settled: correct, or revealed after two wrong.
+  const [wrongPicks, setWrongPicks] = useState<Record<string, string[]>>({});
 
   // 4/5 of the hardcoded exercises had their correct answer at options[0] — see
   // shuffleOptions.ts. Seeded by studentId+questionId, so it's stable for this student but
@@ -63,25 +68,36 @@ export default function Exercises() {
   };
 
   const handleSelectAnswer = (qId: string, answer: string) => {
-    if (submitted[qId]) return;
+    if (submitted[qId] || (wrongPicks[qId] || []).includes(answer)) return;
     setUserAnswers((prev) => ({ ...prev, [qId]: answer }));
   };
 
   const handleSubmitAnswer = (qId: string) => {
-    if (!userAnswers[qId] || submitted[qId]) return;
-    setSubmitted((prev) => ({ ...prev, [qId]: true }));
-
+    const answer = userAnswers[qId];
     const q = questions.find((item) => item.id === qId);
-    const xpKey = `mcq-${qId}`;
-    if (q && userAnswers[qId] === q.correctAnswer && settings.enableXp && !progress.checkQuestionXpAwarded.includes(xpKey)) {
-      const updatedProgress: StudentProgress = {
-        ...progress,
-        xp: progress.xp + CHECK_QUESTION_CORRECT_XP,
-        checkQuestionXpAwarded: [...progress.checkQuestionXpAwarded, xpKey]
-      };
+    if (!answer || !q || submitted[qId]) return;
+
+    const isCorrect = answer === q.correctAnswer;
+    const priorWrong = (wrongPicks[qId] || []).length;
+    const result = resolveCheckAttempt(progress, `mcq-${qId}`, isCorrect, priorWrong, settings.enableXp);
+    // Any submitted answer counts toward the daily streak, whether or not it earns XP.
+    const updatedProgress = withActivity(result.progress);
+    if (updatedProgress !== progress) {
       saveStudentProgress(updatedProgress);
       setProgress(updatedProgress);
-      setXpGranted((prev) => ({ ...prev, [qId]: true }));
+    }
+
+    if (!isCorrect) setWrongPicks((prev) => ({ ...prev, [qId]: [...(prev[qId] || []), answer] }));
+    if (result.outcome === 'retry') {
+      // First strike: explain the picked option, don't reveal the answer; clear it to re-pick.
+      setUserAnswers((prev) => {
+        const copy = { ...prev };
+        delete copy[qId];
+        return copy;
+      });
+    } else {
+      setSubmitted((prev) => ({ ...prev, [qId]: true }));
+      setXpGranted((prev) => ({ ...prev, [qId]: result.xpAwarded }));
     }
   };
 
@@ -96,6 +112,8 @@ export default function Exercises() {
     setRawQuestions(generateExercises());
     setUserAnswers({});
     setSubmitted({});
+    setWrongPicks({});
+    setXpGranted({});
     setHintsVisible({});
   };
 
@@ -118,7 +136,7 @@ export default function Exercises() {
               <Trophy className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[10px] uppercase font-bold text-indigo-400">Total XP Score</p>
+              <p className="text-xs sm:text-[10px] uppercase font-bold text-indigo-400">Total XP Score</p>
               <p className="text-xl font-black text-indigo-900">{progress.xp} XP</p>
             </div>
           </div>
@@ -129,7 +147,7 @@ export default function Exercises() {
       <div className="flex bg-slate-200/60 p-1 rounded-xl w-fit">
         <button
           onClick={() => setTab('mcq')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+          className={`px-4 py-2 min-h-11 sm:min-h-0 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
             tab === 'mcq' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
           }`}
         >
@@ -137,7 +155,7 @@ export default function Exercises() {
         </button>
         <button
           onClick={() => setTab('applied')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+          className={`px-4 py-2 min-h-11 sm:min-h-0 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
             tab === 'applied' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
           }`}
         >
@@ -154,7 +172,7 @@ export default function Exercises() {
             <button
               key={lvl}
               onClick={() => setActiveFilter(lvl)}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+              className={`px-4 py-2 min-h-11 sm:min-h-0 rounded-lg text-xs font-bold transition-all ${
                 activeFilter === lvl
                   ? 'bg-white text-indigo-700 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
@@ -167,7 +185,7 @@ export default function Exercises() {
 
         <button
           onClick={handleRefreshQuestions}
-          className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold rounded-xl transition-colors shadow-2xs flex items-center gap-2"
+          className="px-4 py-2 min-h-11 sm:min-h-0 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold rounded-xl transition-colors shadow-2xs flex items-center gap-2"
         >
           <RefreshCw className="w-3.5 h-3.5 text-indigo-600" /> สุ่มชุดแบบฝึกหัดใหม่
         </button>
@@ -178,6 +196,8 @@ export default function Exercises() {
         {filteredQuestions.map((q, idx) => {
           const isDone = submitted[q.id];
           const isCorrect = isDone && userAnswers[q.id] === q.correctAnswer;
+          const strikes = wrongPicks[q.id] || [];
+          const lastWrong = strikes[strikes.length - 1];
           const currentHintLevel = hintsVisible[q.id] || 0;
 
           return (
@@ -190,7 +210,7 @@ export default function Exercises() {
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-slate-400">ข้อ {idx + 1}</span>
                   <span
-                    className={`px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                    className={`px-2.5 py-0.5 rounded-md text-xs sm:text-[10px] font-bold uppercase tracking-wider ${
                       q.difficulty === 'Easy'
                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                         : q.difficulty === 'Medium'
@@ -206,7 +226,7 @@ export default function Exercises() {
                 {settings.enableHints && (
                   <button
                     onClick={() => handleToggleHint(q.id)}
-                    className="text-amber-600 hover:text-amber-800 text-xs font-bold flex items-center gap-1 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200"
+                    className="min-h-11 sm:min-h-0 text-amber-600 hover:text-amber-800 text-xs font-bold flex items-center gap-1 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200"
                   >
                     💡 คำใบ้ ({currentHintLevel}/3)
                   </button>
@@ -225,9 +245,11 @@ export default function Exercises() {
                     <button
                       key={opt}
                       onClick={() => handleSelectAnswer(q.id, opt)}
-                      disabled={isDone}
-                      className={`p-3 rounded-xl border text-xs font-bold text-left transition-all ${
-                        userAnswers[q.id] === opt
+                      disabled={isDone || strikes.includes(opt)}
+                      className={`p-3 min-h-11 sm:min-h-0 rounded-xl border text-sm sm:text-xs font-bold text-left transition-all ${
+                        strikes.includes(opt)
+                          ? 'bg-rose-50 border-rose-300 text-rose-800 line-through decoration-rose-300'
+                          : userAnswers[q.id] === opt
                           ? 'bg-indigo-50 border-indigo-500 text-indigo-900 shadow-xs'
                           : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
                       }`}
@@ -249,13 +271,29 @@ export default function Exercises() {
                 </div>
               )}
 
+              {/* First strike: why the submitted option is wrong, without revealing the answer. */}
+              {!isDone && lastWrong !== undefined && (
+                <div className="p-3 rounded-xl text-xs bg-amber-50 border border-amber-200 text-amber-900 space-y-1">
+                  <p className="font-bold">✕ ยังไม่ถูก — ลองคิดอีกครั้งนะ</p>
+                  {q.optionFeedback?.[lastWrong] && (
+                    <p>
+                      <RenderTextWithMath text={q.optionFeedback[lastWrong]} />
+                    </p>
+                  )}
+                  <p className="text-amber-700">
+                    เลือกคำตอบใหม่แล้วส่งได้อีก 1 ครั้ง
+                    {settings.enableXp ? ` (ตอบถูกครั้งนี้ได้ +${CHECK_QUESTION_SECOND_TRY_XP} XP)` : ''}
+                  </p>
+                </div>
+              )}
+
               {/* Action & Explanation */}
               <div className="flex items-center justify-between pt-2 border-t border-slate-100">
                 {!isDone ? (
                   <button
                     onClick={() => handleSubmitAnswer(q.id)}
                     disabled={!userAnswers[q.id]}
-                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs transition-colors ml-auto"
+                    className="px-5 py-2 min-h-11 sm:min-h-0 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs transition-colors ml-auto"
                   >
                     ส่งคำตอบ
                   </button>
@@ -271,12 +309,13 @@ export default function Exercises() {
                       {isCorrect ? (
                         <>
                           <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                          คำตอบถูกต้อง!{xpGranted[q.id] ? ` คุณได้รับ +${CHECK_QUESTION_CORRECT_XP} XP` : ''}
+                          คำตอบถูกต้อง!{strikes.length > 0 ? ' (ตอบถูกในครั้งที่ 2)' : ''}
+                          {xpGranted[q.id] ? ` คุณได้รับ +${xpGranted[q.id]} XP` : ''}
                         </>
                       ) : (
                         <>
                           <XCircle className="w-4 h-4 text-rose-600" />
-                          ยังไม่ถูกต้อง คำตอบที่ถูกต้องคือ: <RenderTextWithMath text={q.correctAnswer} />
+                          ยังไม่ถูกต้องทั้ง 2 ครั้ง คำตอบที่ถูกต้องคือ: <RenderTextWithMath text={q.correctAnswer as string} />
                         </>
                       )}
                     </div>
@@ -300,7 +339,7 @@ export default function Exercises() {
             <button
               key={f}
               onClick={() => setAppliedFilter(f)}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              className={`px-4 py-2 min-h-11 sm:min-h-0 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
                 appliedFilter === f ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -319,7 +358,7 @@ export default function Exercises() {
               <div key={problem.id} className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <span
-                    className={`px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border ${
+                    className={`px-2.5 py-0.5 rounded-md text-xs sm:text-[10px] font-bold uppercase tracking-wider border ${
                       problem.field === 'engineering'
                         ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                         : 'bg-teal-50 text-teal-700 border-teal-200'
@@ -328,7 +367,7 @@ export default function Exercises() {
                     {problem.fieldLabel}
                   </span>
                   <span
-                    className={`px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                    className={`px-2.5 py-0.5 rounded-md text-xs sm:text-[10px] font-bold uppercase tracking-wider ${
                       problem.difficulty === 'Easy'
                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                         : problem.difficulty === 'Medium'
@@ -360,7 +399,7 @@ export default function Exercises() {
                   {revealed < 3 && (
                     <button
                       onClick={() => handleAdvanceReveal(problem.id)}
-                      className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+                      className="px-4 py-2 min-h-11 sm:min-h-0 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
                     >
                       <Eye className="w-3.5 h-3.5" />{' '}
                       {revealed === 0 && 'ดูขั้นตอนที่ 1: แนวทางที่แนะนำ'}
@@ -371,7 +410,7 @@ export default function Exercises() {
                   {revealed > 0 && (
                     <button
                       onClick={() => handleCollapseReveal(problem.id)}
-                      className="text-xs font-bold text-slate-400 hover:text-slate-600 underline"
+                      className="inline-flex items-center min-h-11 sm:min-h-0 text-xs font-bold text-slate-400 hover:text-slate-600 underline"
                     >
                       ซ่อนแนวทางและคำตอบทั้งหมด
                     </button>

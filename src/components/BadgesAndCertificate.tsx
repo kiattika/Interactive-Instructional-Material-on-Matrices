@@ -53,6 +53,16 @@ export const ALL_BADGES: BadgeInfo[] = [
     category: 'methods'
   },
   {
+    // Rule lives in lib/motivation.ts (VERSATILE_SOLVER_BADGE): awarded for breadth — trying
+    // every method — never for favoring one, since all three are equally valid for 2x2/3x3.
+    id: 'versatile_solver',
+    name: 'Versatile Solver',
+    thaiName: 'ผู้เชี่ยวชาญรอบด้าน',
+    description: 'ทดลองแก้ระบบสมการใน Matrix Lab ครบทั้ง 3 วิธี (Inverse, Cramer, Gauss)',
+    icon: '🧩',
+    category: 'methods'
+  },
+  {
     id: 'matrix_master',
     name: 'Matrix Master',
     thaiName: 'มหาบัณฑิตเมทริกซ์ (Matrix Master)',
@@ -98,8 +108,8 @@ export function BadgesList({ progress }: { progress: StudentProgress }) {
                 <p className="text-xs font-bold text-indigo-900">{badge.name}</p>
                 {isEarned && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
               </div>
-              <p className="text-[11px] font-semibold text-slate-700">{badge.thaiName}</p>
-              <p className="text-[10px] text-slate-500 mt-1 leading-tight">{badge.description}</p>
+              <p className="text-xs sm:text-[11px] font-semibold text-slate-700">{badge.thaiName}</p>
+              <p className="text-xs sm:text-[10px] text-slate-500 mt-1 leading-tight">{badge.description}</p>
             </div>
           </div>
         );
@@ -216,17 +226,17 @@ export function CertificateModal({ progress, showXp = true, showBadges = true, o
             >
               {showXp && (
                 <div>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase">คะแนนสะสม</p>
+                  <p className="text-xs sm:text-[10px] text-slate-400 font-bold uppercase">คะแนนสะสม</p>
                   <p className="text-base font-black text-indigo-600">{progress.xp} XP</p>
                 </div>
               )}
               <div>
-                <p className="text-[10px] text-slate-400 font-bold uppercase">ความเชี่ยวชาญรวม</p>
+                <p className="text-xs sm:text-[10px] text-slate-400 font-bold uppercase">ความเชี่ยวชาญรวม</p>
                 <p className="text-base font-black text-emerald-600">{averageMastery}%</p>
               </div>
               {showBadges && (
                 <div>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase">ตราสัญลักษณ์</p>
+                  <p className="text-xs sm:text-[10px] text-slate-400 font-bold uppercase">ตราสัญลักษณ์</p>
                   <p className="text-base font-black text-amber-600">{progress.earnedBadges.length} Badges</p>
                 </div>
               )}
@@ -234,7 +244,7 @@ export function CertificateModal({ progress, showXp = true, showBadges = true, o
 
             <div className="flex justify-between items-end mt-8 pt-6 border-t border-slate-200 px-6 text-left">
               <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase">วันที่ออกใบรับรอง</p>
+                <p className="text-xs sm:text-[10px] font-bold text-slate-400 uppercase">วันที่ออกใบรับรอง</p>
                 <p className="text-xs font-bold text-slate-700">
                   {new Date().toLocaleDateString('th-TH', {
                     year: 'numeric',
@@ -247,7 +257,7 @@ export function CertificateModal({ progress, showXp = true, showBadges = true, o
                 <div className="w-32 h-10 border-b border-slate-400 mx-auto flex items-end justify-center pb-1 font-serif text-indigo-900 italic text-sm font-bold">
                   MatrixMaster AI
                 </div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">ระบบประเมินผลอัตโนมัติ</p>
+                <p className="text-xs sm:text-[10px] font-bold text-slate-400 uppercase mt-1">ระบบประเมินผลอัตโนมัติ</p>
               </div>
             </div>
           </div>

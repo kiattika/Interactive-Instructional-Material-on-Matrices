@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- The app's header brand mark (white "M" on a rounded indigo-600 square), drawn as a path so
+       rasterizing never depends on installed fonts. Source for icon-192/512.png and the favicon. -->
+  <rect width="512" height="512" rx="120" fill="#4f39f6"/>
+  <path fill="#fff" d="M136 366V146h64l56 90 56-90h64v220h-56V240l-48 76h-32l-48-76v126z"/>
+</svg>

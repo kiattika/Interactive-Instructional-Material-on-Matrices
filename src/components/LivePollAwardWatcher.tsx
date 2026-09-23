@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { loadStudentProgress, saveStudentProgress, loadTeacherSettings } from '../lib/learningStore';
 import { getStudentId } from '../lib/classroomSync';
+import { withActivity } from '../lib/motivation';
 import { checkPendingAwards, acknowledgeAward } from '../lib/livePollClient';
 
 interface LivePollAwardWatcherProps {
@@ -38,7 +39,7 @@ export const LivePollAwardWatcher: React.FC<LivePollAwardWatcherProps> = ({ clas
       for (const award of awards) {
         if (enableXp) {
           const progress = loadStudentProgress();
-          saveStudentProgress({ ...progress, xp: progress.xp + award.xp });
+          saveStudentProgress(withActivity({ ...progress, xp: progress.xp + award.xp }));
           totalXp += award.xp;
         }
         await acknowledgeAward(award.pollId, studentId);
