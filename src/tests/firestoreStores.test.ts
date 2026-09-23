@@ -124,7 +124,8 @@ async function main() {
         gaussianElimination: 0,
         solutionTypes: 0
       },
-      earnedBadges: []
+      earnedBadges: [],
+      lessonCheckScores: {}
     };
 
     // 1. Class lifecycle: create, sync, roster, close/reopen gating, note, listing.
@@ -132,7 +133,7 @@ async function main() {
     assert(classCode.length === 6, 'createClass returns a 6-char code');
     assert(await classroom.isClassUsable(classCode), 'a freshly created class is usable');
 
-    const syncRes = await classroom.syncStudentProgress(classCode, 'stu1', 'สมชาย', { ...blankProgress, xp: 10 });
+    const syncRes = await classroom.syncStudentProgress(classCode, 'stu1', 'สมชาย', { ...blankProgress, xp: 10, lessonCheckScores: { 3: 70 } });
     assert(syncRes.ok === true, 'syncStudentProgress succeeds for a real, active class');
 
     const roster = await classroom.fetchRoster(classCode);
@@ -140,6 +141,7 @@ async function main() {
       roster !== null && roster.length === 1 && roster[0].studentId === 'stu1' && roster[0].progress.xp === 10,
       'fetchRoster reflects the just-synced student, as its own document (not a whole-roster blob)'
     );
+    assert(roster !== null && roster[0].progress.lessonCheckScores?.[3] === 70, 'lessonCheckScores (E1 data) round-trips through the roster sync');
 
     const badSync = await classroom.syncStudentProgress('NOPE99', 'stu1', 'x', blankProgress);
     assert(

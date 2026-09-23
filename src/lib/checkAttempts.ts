@@ -43,12 +43,19 @@ export function resolveCheckAttempt(
 ): CheckAttemptResult {
   const settled = progress.checkQuestionXpAwarded.includes(xpKey);
   const missedBefore = wrongPicksThisSitting > 0 || progress.checkQuestionFirstTryMissed.includes(xpKey);
+  // First-settle outcome for lesson scoring (E1) — only when the question is settling for the
+  // first time, so a practice retry after the answer was revealed can never improve it.
+  const withOutcome = (p: StudentProgress, value: number): StudentProgress =>
+    settled || xpKey in p.checkQuestionOutcomes
+      ? p
+      : { ...p, checkQuestionOutcomes: { ...p.checkQuestionOutcomes, [xpKey]: value } };
 
   if (isCorrect) {
-    if (settled || !xpEnabled) return { progress, outcome: 'correct', xpAwarded: 0 };
+    const recorded = withOutcome(progress, missedBefore ? 0.5 : 1);
+    if (settled || !xpEnabled) return { progress: recorded, outcome: 'correct', xpAwarded: 0 };
     const xp = missedBefore ? CHECK_QUESTION_SECOND_TRY_XP : CHECK_QUESTION_CORRECT_XP;
     return {
-      progress: { ...progress, xp: progress.xp + xp, checkQuestionXpAwarded: [...progress.checkQuestionXpAwarded, xpKey] },
+      progress: { ...recorded, xp: recorded.xp + xp, checkQuestionXpAwarded: [...recorded.checkQuestionXpAwarded, xpKey] },
       outcome: 'correct',
       xpAwarded: xp
     };
@@ -61,6 +68,23 @@ export function resolveCheckAttempt(
     return { progress: next, outcome: 'retry', xpAwarded: 0 };
   }
 
-  const next = settled ? progress : { ...progress, checkQuestionXpAwarded: [...progress.checkQuestionXpAwarded, xpKey] };
+  const revealed = withOutcome(progress, 0);
+  const next = settled ? revealed : { ...revealed, checkQuestionXpAwarded: [...revealed.checkQuestionXpAwarded, xpKey] };
   return { progress: next, outcome: 'revealed', xpAwarded: 0 };
+}
+
+/**
+ * A lesson's formative score, 0-100: the mean of its check-questions' first-settle outcomes
+ * (1 / 0.5 / 0) × 100 — exact, no rounding. null unless EVERY question has a recorded outcome
+ * (e.g. questions settled before outcomes were tracked), so E1 never uses a partial or guessed score.
+ */
+export function lessonCheckScore(progress: StudentProgress, lessonId: number, questionCount: number): number | null {
+  if (questionCount === 0) return null;
+  let total = 0;
+  for (let i = 0; i < questionCount; i++) {
+    const outcome = progress.checkQuestionOutcomes[`lesson${lessonId}-check${i}`];
+    if (outcome === undefined) return null;
+    total += outcome;
+  }
+  return (total / questionCount) * 100;
 }
