@@ -21,7 +21,7 @@ import {
   CHECK_QUESTION_CORRECT_XP,
   CHECK_QUESTION_SECOND_TRY_XP
 } from '../lib/learningStore';
-import { resolveCheckAttempt } from '../lib/checkAttempts';
+import { resolveCheckAttempt, lessonCheckScore } from '../lib/checkAttempts';
 import { formatFractionOrDec } from '../lib/matrixEngine';
 import { shuffleOptions } from '../lib/shuffleOptions';
 import { getStudentId } from '../lib/classroomSync';
@@ -173,6 +173,13 @@ export default function LessonView() {
       xp: settings.enableXp ? progress.xp + 50 : progress.xp,
       lessonScores: { ...progress.lessonScores, [lesson.id]: 100 }
     });
+
+    // Real formative score for this lesson (E1 data, synced to the roster) — only when every
+    // check-question has a first-settle outcome, and never overwritten once recorded.
+    const checkScore = lessonCheckScore(updatedProgress, lesson.id, lesson.checkQuestions.length);
+    if (checkScore !== null && updatedProgress.lessonCheckScores[lesson.id] === undefined) {
+      updatedProgress.lessonCheckScores = { ...updatedProgress.lessonCheckScores, [lesson.id]: checkScore };
+    }
 
     // Award badges if applicable (rules in lib/motivation.ts) — earnedBadges is never touched at
     // all while badges are disabled, so nothing is retroactively earned the moment a teacher

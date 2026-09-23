@@ -79,6 +79,16 @@ export interface StudentProgress {
   // isn't re-prompted. Local-only: never sent with the survey answers, and not part of the
   // classroom sync payload either (classroomSync.ts whitelists synced fields).
   hasCompletedSurvey: boolean;
+  // First-settle outcome of each practice question, keyed like checkQuestionXpAwarded: 1 = correct
+  // on the first try, 0.5 = correct on the second try, 0 = answer revealed after two wrong picks.
+  // Recorded once (never overwritten, so retrying after seeing the answer can't improve it) and
+  // regardless of the XP setting — it's measurement data, not a reward.
+  checkQuestionOutcomes: Record<string, number>;
+  // lessonId -> 0-100 formative score from that lesson's check-question outcomes, recorded when the
+  // lesson is finished (see lessonCheckScore in lib/checkAttempts.ts). This — not lessonScores,
+  // which is always 100 on completion — is the in-process data behind E1 (lib/efficiencyStats.ts).
+  // Synced to the classroom roster.
+  lessonCheckScores: Record<number, number>;
 }
 
 // A check-question is a much smaller unit of effort than finishing a whole lesson (+50 XP,
@@ -1270,7 +1280,9 @@ export const defaultStudentProgress: StudentProgress = {
   higherOrderLabCompleted: false,
   methodsUsed: [],
   activityDates: [],
-  hasCompletedSurvey: false
+  hasCompletedSurvey: false,
+  checkQuestionOutcomes: {},
+  lessonCheckScores: {}
 };
 
 export const defaultTeacherSettings: TeacherSettings = {

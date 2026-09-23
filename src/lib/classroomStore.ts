@@ -14,6 +14,9 @@ export type SyncedProgress = Pick<
   | 'postTestScore'
   | 'topicMastery'
   | 'earnedBadges'
+  // Real per-lesson formative scores (drives E1 in TeacherAnalytics). Absent on roster records
+  // synced before this field existed — readers must treat it as optional.
+  | 'lessonCheckScores'
 >;
 
 export interface StudentRecord {

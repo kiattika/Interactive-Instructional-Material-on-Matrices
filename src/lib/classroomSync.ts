@@ -111,7 +111,8 @@ function toSyncedProgress(progress: StudentProgress): SyncedProgress {
     postTestCompleted: progress.postTestCompleted,
     postTestScore: progress.postTestScore,
     topicMastery: progress.topicMastery,
-    earnedBadges: progress.earnedBadges
+    earnedBadges: progress.earnedBadges,
+    lessonCheckScores: progress.lessonCheckScores
   };
 }
 

@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { BarChart, Users, AlertTriangle, RefreshCw, Info, Link as LinkIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { loadTeacherSettings, TeacherSettings } from '../lib/learningStore';
 import type { StudentRecord, ClassSummary } from '../lib/classroomStore';
 import { StudentRosterRow } from '../components/StudentRosterRow';
 import { SurveyResultsPanel } from '../components/SurveyResultsPanel';
+import { EfficiencyStatsPanel } from '../components/EfficiencyStatsPanel';
+import { computeEfficiencyStats } from '../lib/efficiencyStats';
 import { cn } from '../lib/utils';
 
 export default function TeacherAnalytics() {
@@ -68,6 +70,39 @@ export default function TeacherAnalytics() {
   useEffect(() => {
     if (classCode) refreshRoster(classCode);
   }, [classCode]);
+
+  // Every student across every classroom, for the "all classrooms" E1/E2/E.I. view — fetched via
+  // the same per-class roster endpoint (one request per class). Only the latest fetch may land.
+  const [allStudents, setAllStudents] = useState<StudentRecord[] | null>(null);
+  const [allStudentsError, setAllStudentsError] = useState<string | null>(null);
+  const allStudentsRequest = useRef(0);
+
+  useEffect(() => {
+    if (!showAllClasses || !allClasses) return;
+    const requestId = ++allStudentsRequest.current;
+    setAllStudents(null);
+    setAllStudentsError(null);
+    Promise.all(
+      allClasses.map(async (cls) => {
+        const res = await fetch(`/api/classroom/${encodeURIComponent(cls.classCode)}/roster`);
+        if (res.status === 404) return [] as StudentRecord[];
+        if (!res.ok) throw new Error(`roster ${cls.classCode}`);
+        return ((await res.json()).students as StudentRecord[]) || [];
+      })
+    )
+      .then((rosters) => {
+        if (requestId === allStudentsRequest.current) setAllStudents(rosters.flat());
+      })
+      .catch(() => {
+        if (requestId === allStudentsRequest.current) setAllStudentsError('ไม่สามารถดึงข้อมูลนักเรียนทุกห้องได้ ลองรีเฟรชอีกครั้ง');
+      });
+  }, [showAllClasses, allClasses]);
+
+  const scopeStudents = showAllClasses ? allStudents : roster;
+  const efficiencyStats = useMemo(
+    () => (scopeStudents ? computeEfficiencyStats(scopeStudents.map((s) => s.progress)) : null),
+    [scopeStudents]
+  );
 
   const currentClass = allClasses?.find((c) => c.classCode === classCode) || null;
   // Scope for the aggregate panels: null = every classroom combined.
@@ -154,6 +189,15 @@ export default function TeacherAnalytics() {
           </div>
         </div>
       </div>
+
+      {/* E1 / E2 / E.I. — follows the classroom selector above (one class, or all combined). */}
+      {(classCode || showAllClasses) && (
+        <EfficiencyStatsPanel
+          stats={efficiencyStats}
+          scopeLabel={aggregateScopeLabel}
+          error={showAllClasses ? allStudentsError : rosterError}
+        />
+      )}
 
       {/* Real per-student roster (Phase 2, no-login). Before a class exists, this shows an
           honest empty state pointing to Settings — no fabricated table appears at any point. */}

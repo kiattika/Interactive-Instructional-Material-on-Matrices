@@ -44,7 +44,8 @@ const sampleProgress: SyncedProgress = {
     gaussianElimination: 90,
     solutionTypes: 60
   },
-  earnedBadges: ['matrix_explorer']
+  earnedBadges: ['matrix_explorer'],
+  lessonCheckScores: { 1: 90, 2: 70 }
 };
 
 // 1. generateClassCode never collides with the excluded set and has the expected shape
