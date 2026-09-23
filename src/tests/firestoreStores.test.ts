@@ -211,6 +211,67 @@ async function main() {
     const pendingAfterAck = await poll.fetchPendingAwards(classCode, 'stu1');
     assert(pendingAfterAck.length === 0, 'the award is no longer pending after acknowledging (never granted twice)');
     assert((await poll.acknowledgePoll(pollId, 'stu1')).ok === true, 're-acknowledging an already-acknowledged poll is idempotent');
+
+    // 3. Anonymous satisfaction survey — a NEW, additive collection. Beyond the store round-trip,
+    // this proves the data-safety claim: every existing classes/ and livePolls/ document is
+    // byte-for-byte unchanged by survey writes, and stored responses carry no student identity.
+    const survey = await import('../../server/surveyFileStore');
+    const { validateSurveySubmission, aggregateSurveyResponses, SURVEY_QUESTION_IDS } = await import('../lib/surveyStore');
+    const { getFirestore } = await import('../../server/firestoreClient');
+    const db = getFirestore();
+
+    const dumpExisting = async () => {
+      const out: Record<string, unknown> = {};
+      for (const col of ['classes', 'livePolls']) {
+        for (const d of (await db.collection(col).get()).docs) {
+          out[d.ref.path] = d.data();
+          for (const sub of await d.ref.listCollections()) {
+            for (const sd of (await sub.get()).docs) out[sd.ref.path] = sd.data();
+          }
+        }
+      }
+      return JSON.stringify(out, Object.keys(out).sort());
+    };
+    const existingBefore = await dumpExisting();
+
+    const { classCode: classCode2 } = await classroom.createClass('ห้องที่สอง');
+    const existingBeforeSurvey = await dumpExisting(); // includes the new second class
+    // Relative, not absolute: an emulator that was already running (e.g. `npm run emulators`, or
+    // one a previous run couldn't tear down on Windows) may hold earlier survey responses.
+    const overallBefore = (await survey.fetchSurveyResponses()).length;
+    const answers = (score: number) => Object.fromEntries(SURVEY_QUESTION_IDS.map((id) => [id, score]));
+    const submit = async (code: string, score: number, comment?: string) => {
+      const v = validateSurveySubmission({ classCode: code, answers: answers(score), comment, studentId: 'stu1', displayName: 'สมชาย' });
+      if (!v.ok) throw new Error('survey fixture failed validation');
+      await survey.submitSurveyResponse(v.response);
+    };
+    await submit(classCode, 5, 'ชอบ Matrix Lab');
+    await submit(classCode, 3);
+    await submit(classCode2, 4);
+
+    const perClass = aggregateSurveyResponses(await survey.fetchSurveyResponses(classCode));
+    assert(perClass.n === 2 && perClass.questions[0].mean === 4, 'per-classroom survey results: n = 2, mean (5 + 3) / 2 = 4');
+    assert(JSON.stringify(perClass.comments) === JSON.stringify(['ชอบ Matrix Lab']), 'per-classroom comments come back as plain text');
+    const overall = aggregateSurveyResponses(await survey.fetchSurveyResponses());
+    assert(overall.n === overallBefore + 3, 'all-classrooms results combine every classroom (collection-group query): all 3 new responses across both classes are counted');
+    const bothNew = aggregateSurveyResponses([
+      ...(await survey.fetchSurveyResponses(classCode)),
+      ...(await survey.fetchSurveyResponses(classCode2))
+    ]);
+    assert(bothNew.n === 3 && Math.abs((bothNew.questions[0].mean as number) - 4) < 1e-9, 'the two classrooms together: n = 3, mean (5 + 3 + 4) / 3 = 4');
+
+    const rawDocs = (await db.collection('surveys').doc(classCode).collection('responses').get()).docs;
+    assert(rawDocs.length === 2, 'responses are stored at surveys/{classCode}/responses/{autoId}');
+    assert(
+      rawDocs.every((d) => JSON.stringify(Object.keys(d.data()).filter((k) => k !== 'comment').sort()) === JSON.stringify(['answers', 'classCode', 'submittedAt'])),
+      'stored survey documents contain only classCode, answers, (comment), submittedAt — no identity field even though the fixture sent studentId/displayName'
+    );
+    assert(rawDocs.every((d) => d.id !== 'stu1' && d.id.length === 20), 'survey document ids are Firestore auto-ids, unrelated to any studentId');
+
+    assert(existingBefore.length > 2, 'sanity: there is existing class/poll data to compare against');
+    assert((await dumpExisting()) === existingBeforeSurvey, 'DATA SAFETY: every classes/ and livePolls/ document (and subcollection doc) is unchanged by survey writes');
+    const topLevel = (await db.listCollections()).map((c) => c.id).sort();
+    assert(JSON.stringify(topLevel) === JSON.stringify(['classes', 'livePolls', 'surveys']), 'the only new top-level collection is surveys/');
   } catch (err) {
     console.error('❌ FAIL: unexpected error while exercising the Firestore-backed stores:', err);
     results.failed = true;

@@ -32,7 +32,19 @@ livePolls/{pollId}                             — pollId, classCode, question, 
                                                   correctAnswer, status, createdAt, closedAt?
 livePolls/{pollId}/answers/{studentId}         — displayName, selectedOption, answeredAt
 livePolls/{pollId}/acknowledgedAwards/{studentId} — acknowledgedAt (marker doc; existence = ack'd)
+
+surveys/{classCode}/responses/{autoId}         — classCode, answers (q1-q11: 1-5), comment?,
+                                                  submittedAt ("YYYY-MM-DD")
 ```
+
+`surveys/` (the anonymous post-course satisfaction survey, added after the migration) is a
+separate, purely additive collection: nothing in `server/surveyFileStore.ts` writes to `classes/`
+or `livePolls/` (it only *reads* `classes/{classCode}` to reject unknown/closed class codes), and
+no existing document shape changed. Responses are anonymous by design — no studentId/displayName
+field, Firestore auto-ids, day-granularity dates; see `src/lib/surveyStore.ts`. The existing
+deny-all `firestore.rules` already covers it (the server is still the only reader/writer).
+`src/tests/firestoreStores.test.ts` verifies against the emulator that survey writes leave every
+`classes/`/`livePolls/` document unchanged.
 
 The key design point carried over from the old file-lock queue: avoid whole-document
 read-modify-write races. Syncing one student's progress, or one student's poll answer, is now a

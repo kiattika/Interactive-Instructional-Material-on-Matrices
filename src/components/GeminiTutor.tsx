@@ -94,7 +94,7 @@ export function GeminiTutor({ system, activeMethod, detA, solutionType }: Gemini
           </div>
           <div>
             <h3 className="text-white font-bold text-sm tracking-wide">ครูพี่หนุ่ม AI</h3>
-            <p className="text-[10px] text-indigo-300 font-medium">Socratic Mentor • ขับเคลื่อนด้วย Gemini</p>
+            <p className="text-xs sm:text-[10px] text-indigo-300 font-medium">Socratic Mentor • ขับเคลื่อนด้วย Gemini</p>
           </div>
         </div>
         <button
@@ -106,7 +106,7 @@ export function GeminiTutor({ system, activeMethod, detA, solutionType }: Gemini
               },
             ])
           }
-          className="text-white/40 hover:text-white text-xs p-1 rounded transition-colors"
+          className="text-white/40 hover:text-white text-xs p-3 -m-2 sm:p-1 sm:m-0 rounded transition-colors"
           title="ล้างแชท"
         >
           <RefreshCw className="w-3.5 h-3.5" />
@@ -125,7 +125,7 @@ export function GeminiTutor({ system, activeMethod, detA, solutionType }: Gemini
             }`}
           >
             {m.sender === 'ai' && (
-              <p className="text-[9px] font-bold text-indigo-300 uppercase tracking-widest mb-1 flex items-center gap-1">
+              <p className="text-[11px] sm:text-[9px] font-bold text-indigo-300 uppercase tracking-widest mb-1 flex items-center gap-1">
                 <Lightbulb className="w-3 h-3 text-amber-300" /> Tutor Advice
               </p>
             )}
@@ -147,13 +147,13 @@ export function GeminiTutor({ system, activeMethod, detA, solutionType }: Gemini
 
       {/* Quick Suggestions */}
       <div className="relative z-10 space-y-1.5 mb-3">
-        <p className="text-[10px] text-indigo-300/70 uppercase font-semibold px-1">คำถามแนะนำ:</p>
+        <p className="text-xs sm:text-[10px] text-indigo-300/70 uppercase font-semibold px-1">คำถามแนะนำ:</p>
         <div className="flex flex-wrap gap-1.5">
           {quickPrompts.map((prompt, i) => (
             <button
               key={i}
               onClick={() => handleSendMessage(prompt)}
-              className="px-2.5 py-1 bg-white/10 hover:bg-white/20 text-white/90 text-[11px] rounded-lg font-medium transition-all border border-white/10 text-left truncate max-w-full"
+              className="px-2.5 py-1 min-h-10 sm:min-h-0 bg-white/10 hover:bg-white/20 text-white/90 text-xs sm:text-[11px] rounded-lg font-medium transition-all border border-white/10 text-left truncate max-w-full"
             >
               {prompt}
             </button>
@@ -175,12 +175,12 @@ export function GeminiTutor({ system, activeMethod, detA, solutionType }: Gemini
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="พิมพ์คำถามคณิตศาสตร์..."
-            className="flex-grow bg-white/10 border border-white/20 rounded-xl px-3 py-2 text-white text-xs placeholder:text-white/40 focus:outline-none focus:border-indigo-400 transition-all"
+            className="flex-grow bg-white/10 border border-white/20 rounded-xl px-3 py-2 min-h-11 sm:min-h-0 text-white text-base sm:text-xs placeholder:text-white/40 focus:outline-none focus:border-indigo-400 transition-all"
           />
           <button
             type="submit"
             disabled={loading || !input.trim()}
-            className="p-2 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white rounded-xl transition-colors flex items-center justify-center shadow-md"
+            className="p-2 min-w-11 sm:min-w-0 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white rounded-xl transition-colors flex items-center justify-center shadow-md"
           >
             <Send className="w-3.5 h-3.5" />
           </button>

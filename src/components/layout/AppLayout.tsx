@@ -1,4 +1,4 @@
-import { ReactNode, useState, useEffect } from 'react';
+import { ReactNode, useState, useEffect, useMemo } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -23,6 +23,7 @@ import { hasVerifiedTeacherPin } from '../../lib/teacherAuth';
 import { ClassroomJoinModal } from '../ClassroomJoinModal';
 import { TeacherPinModal } from '../TeacherPinModal';
 import { LivePollAwardWatcher } from '../LivePollAwardWatcher';
+import { PresentationChromeContext } from './PresentationChromeContext';
 
 const TEACHER_ROUTE_PREFIXES = ['/teacher', '/presentation'];
 
@@ -37,6 +38,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
   // component re-renders and re-reads the localStorage/sessionStorage-backed values below —
   // those aren't React state, so nothing else would otherwise trigger the re-render.
   const [refreshTick, setRefreshTick] = useState(0);
+  // Projector mode (see PresentationChromeContext): hides the header + sidebar so the page
+  // renders edge to edge. Declared up here, before the gate early-returns, to keep hook order fixed.
+  const [chromeHidden, setChromeHidden] = useState(false);
+  const chromeContextValue = useMemo(() => ({ chromeHidden, setChromeHidden }), [chromeHidden]);
   const progress = loadStudentProgress();
   const settings = loadTeacherSettings();
   const classroomLink = getClassroomLink();
@@ -44,6 +49,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setIsMobileMenuOpen(false);
+    // Safety net on top of TeacherPresentation's own unmount cleanup: chrome-hiding never
+    // survives navigating to a different route.
+    setChromeHidden(false);
   }, [location.pathname]);
 
   const isJoinedStudent = !!classroomLink;
@@ -136,13 +144,19 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const effectiveMode = isTeacherRoute ? 'teacher' : isJoinedStudent ? 'student' : appMode;
   const currentNav = effectiveMode === 'student' ? studentNav : teacherNav;
 
+  // Header, overlay and sidebar are conditionally rendered in place (never by swapping to a
+  // different wrapper tree) so `children` keeps the same position in the tree — toggling
+  // projector mode must not remount the page and wipe its step/poll state.
   return (
+    <PresentationChromeContext.Provider value={chromeContextValue}>
     <div className="flex flex-col h-screen bg-slate-50 font-sans overflow-hidden">
+      {!chromeHidden && (
       <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-6 flex-shrink-0 z-20">
         <div className="flex items-center gap-3">
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="md:hidden p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+            aria-label="เมนู"
+            className="md:hidden p-3 -ml-3 text-slate-600 hover:bg-slate-100 rounded-lg"
           >
             {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
@@ -154,7 +168,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <h1 className="text-lg font-black text-slate-800 tracking-tight">
               MatrixMaster <span className="text-indigo-600">Pro</span>
             </h1>
-            <p className="text-[10px] text-slate-400 font-bold uppercase"> Classroom Learning Platform</p>
+            <p className="text-xs sm:text-[10px] text-slate-400 font-bold uppercase"> Classroom Learning Platform</p>
           </div>
         </div>
 
@@ -193,7 +207,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         {effectiveMode === 'student' ? (
           <div className="flex items-center gap-3 sm:gap-4">
             <div className="flex flex-col items-end hidden md:flex">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              <span className="text-xs sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                 {progress.studentName}
               </span>
               {(settings.enableXp || settings.enableBadges) && (
@@ -214,7 +228,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         ) : (
           <div className="flex items-center gap-3 sm:gap-4">
             <div className="flex flex-col items-end hidden md:flex">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">โหมดครูผู้สอน</span>
+              <span className="text-xs sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider">โหมดครูผู้สอน</span>
               <span className="text-xs font-extrabold text-slate-700">Teacher Mode</span>
             </div>
             <div className="w-8 h-8 sm:w-9 sm:h-9 bg-slate-900 text-amber-400 rounded-full border-2 border-slate-700 flex items-center justify-center font-black text-xs">
@@ -223,10 +237,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </div>
         )}
       </header>
+      )}
 
       <main className="flex-grow flex overflow-hidden relative">
         {/* Mobile Sidebar Overlay */}
-        {isMobileMenuOpen && (
+        {!chromeHidden && isMobileMenuOpen && (
           <div 
             className="fixed inset-0 bg-slate-900/50 z-10 md:hidden"
             onClick={() => setIsMobileMenuOpen(false)}
@@ -234,6 +249,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         )}
         
         {/* Sidebar Nav */}
+        {!chromeHidden && (
         <nav className={cn(
           "absolute md:static w-64 md:w-60 h-full bg-white md:bg-transparent border-r md:border-r-0 border-slate-200 p-4 md:p-3 flex flex-col gap-1.5 z-20 transition-transform duration-200 ease-in-out md:translate-x-0 overflow-y-auto",
           isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
@@ -248,7 +264,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                     navigate('/learning');
                     setIsMobileMenuOpen(false);
                   }}
-                  className={`flex-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  className={`flex-1 px-3 py-1.5 min-h-11 md:min-h-0 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                     appMode === 'student'
                       ? 'bg-indigo-600 text-white shadow-sm'
                       : 'text-slate-600 hover:text-slate-900'
@@ -261,7 +277,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                     handleTeacherModeClick();
                     setIsMobileMenuOpen(false);
                   }}
-                  className={`flex-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  className={`flex-1 px-3 py-1.5 min-h-11 md:min-h-0 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                     appMode === 'teacher'
                       ? 'bg-slate-900 text-white shadow-sm'
                       : 'text-slate-600 hover:text-slate-900'
@@ -272,7 +288,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
               </div>
             )}
 
-            <p className="text-[10px] font-bold text-slate-400 uppercase px-3 mb-1 tracking-widest">
+            <p className="text-xs sm:text-[10px] font-bold text-slate-400 uppercase px-3 mb-1 tracking-widest">
               {effectiveMode === 'student' ? 'เมนูนักเรียน (Student)' : 'เมนูครูผู้สอน (Teacher)'}
             </p>
             {currentNav.map((item) => {
@@ -283,7 +299,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                   to={item.path}
                   className={({ isActive }) =>
                     cn(
-                      'flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition-colors font-bold flex-shrink-0',
+                      'flex items-center gap-2.5 px-3 py-2 min-h-11 md:min-h-0 rounded-xl text-sm md:text-xs transition-colors font-bold flex-shrink-0',
                       isActive
                         ? 'bg-indigo-50 text-indigo-700 border border-indigo-100'
                         : 'text-slate-600 hover:bg-slate-50'
@@ -302,13 +318,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
             {effectiveMode === 'student' && (
               <button
                 onClick={() => setShowJoinModal(true)}
-                className="mt-auto p-3 bg-white border border-slate-200 rounded-xl text-[11px] font-bold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 transition-colors flex items-start gap-2 flex-shrink-0 text-left"
+                className="mt-auto p-3 bg-white border border-slate-200 rounded-xl text-xs sm:text-[11px] font-bold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 transition-colors flex items-start gap-2 flex-shrink-0 text-left"
               >
                 <Users className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
                 {classroomLink ? (
                   <span className="min-w-0">
                     <span className="block truncate">ห้องเรียน: {classroomLink.classCode}</span>
-                    <span className="block truncate text-[10px] font-medium text-slate-400 normal-case">
+                    <span className="block truncate text-xs sm:text-[10px] font-medium text-slate-400 normal-case">
                       {classroomLink.note ? `${classroomLink.note} · ` : ''}
                       {progress.studentName}
                     </span>
@@ -324,7 +340,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
                   <Sparkles className="w-3.5 h-3.5" /> Matrix Assistant
                 </div>
-                <p className="text-[11px] text-indigo-200 leading-tight">
+                <p className="text-xs sm:text-[11px] text-indigo-200 leading-tight">
                   ครูผู้ช่วย AI ตอบคำถามและแนะนำการแก้โจทย์ทีละขั้นตอน
                 </p>
               </div>
@@ -332,23 +348,29 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
             {/* Creator Attribution */}
             <div className="mt-2 p-3 bg-slate-50 border border-slate-200/80 rounded-xl text-slate-700 flex flex-col gap-0.5 flex-shrink-0">
-              <div className="flex items-center gap-1.5 text-[10px] font-bold text-indigo-700 uppercase tracking-wide">
+              <div className="flex items-center gap-1.5 text-xs sm:text-[10px] font-bold text-indigo-700 uppercase tracking-wide">
                 <GraduationCap className="w-3.5 h-3.5 text-indigo-600" /> ผู้จัดทำสื่อการสอน
               </div>
               <p className="text-xs font-bold text-slate-800">
                 ครูเกียรติศักดิ์ แก้วหล้า
               </p>
-              <p className="text-[11px] text-slate-600 font-medium leading-tight">
+              <p className="text-xs sm:text-[11px] text-slate-600 font-medium leading-tight">
                 ครูโรงเรียนอุตรดิตถ์
               </p>
-              <p className="text-[10px] text-slate-400 font-medium leading-tight">
+              <p className="text-xs sm:text-[10px] text-slate-400 font-medium leading-tight">
                 วิทยฐานะ ครูชำนาญการพิเศษ
               </p>
             </div>
           </div>
         </nav>
+        )}
 
-        <section className="flex-grow overflow-y-auto p-4 sm:p-6 pb-20 md:pb-6 relative w-full overflow-x-hidden">
+        <section
+          className={cn(
+            'flex-grow overflow-y-auto relative w-full overflow-x-hidden',
+            chromeHidden ? 'p-0' : 'p-4 sm:p-6 pb-20 md:pb-6'
+          )}
+        >
           {children}
         </section>
       </main>
@@ -367,5 +389,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
       )}
       {isJoinedStudent && classroomLink && <LivePollAwardWatcher classCode={classroomLink.classCode} />}
     </div>
+    </PresentationChromeContext.Provider>
   );
 }

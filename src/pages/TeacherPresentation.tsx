@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ChevronRight,
   ChevronLeft,
@@ -9,7 +9,9 @@ import {
   Radio,
   Loader2,
   CircleStop,
-  Trophy
+  Trophy,
+  Maximize,
+  Minimize
 } from 'lucide-react';
 import { toDataURL } from 'qrcode';
 import { LinearSystem, SystemDimension, SolutionType } from '../types';
@@ -32,6 +34,7 @@ import {
   formatLatexFraction
 } from '../components/math/MathComponents';
 import { getTeacherClassCode } from '../lib/classroomSync';
+import { usePresentationChrome } from '../components/layout/PresentationChromeContext';
 import {
   createLivePoll,
   fetchPollResults,
@@ -39,6 +42,32 @@ import {
   LivePollPublicView,
   PollCloseSummaryClient
 } from '../lib/livePollClient';
+
+// Projector-scale styling. This page has two audiences: content the class reads from across the
+// room (matrices, step headings, explanations, poll results) scales up at lg/xl/2xl, while the
+// controls the teacher operates up close (method switcher, generator, poll buttons, footer bar)
+// deliberately stay at normal desktop size and never use these.
+const STEP_CARD = 'p-6 lg:p-8 2xl:p-10 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3 lg:space-y-5';
+const STEP_HEADING =
+  'text-xs lg:text-base xl:text-lg 2xl:text-xl font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2 lg:gap-3';
+const STEP_BADGE =
+  'w-6 h-6 lg:w-9 lg:h-9 2xl:w-11 2xl:h-11 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs lg:text-base 2xl:text-lg font-black flex-shrink-0';
+// Small explanatory prose inside step cards.
+const STEP_NOTE = 'text-xs lg:text-base 2xl:text-lg';
+
+// Live-measured offsetHeight of an element (tracks wrapping/resizes), used to pad the page for
+// the fixed projector-mode bars.
+function useElementHeight(ref: { current: HTMLElement | null }): number {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => setHeight(el.offsetHeight));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+  return height;
+}
 
 function getClassroomQuestion(method: 'inverse' | 'cramer' | 'gauss', step: number) {
   if (method === 'gauss') {
@@ -283,6 +312,62 @@ function getClassroomQuestion(method: 'inverse' | 'cramer' | 'gauss', step: numb
 }
 
 export default function TeacherPresentation() {
+  // Projector mode = real browser fullscreen (when the browser allows it) PLUS AppLayout hiding
+  // its header/sidebar. The chrome-hiding half is the source of truth: it still engages when
+  // requestFullscreen() is blocked, so the teacher always gets the edge-to-edge layout.
+  const { chromeHidden: isProjectorMode, setChromeHidden } = usePresentationChrome();
+
+  const exitProjectorMode = useCallback(() => {
+    setChromeHidden(false);
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+  }, [setChromeHidden]);
+
+  async function enterProjectorMode() {
+    setChromeHidden(true);
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      }
+    } catch {
+      // Blocked (iframe without allowfullscreen, unsupported browser, etc.) — stay in the
+      // chrome-hidden fallback; Escape / the exit button still get the teacher out.
+    }
+  }
+
+  // Any exit from real fullscreen (browser Escape, F11, OS gesture) drops projector mode too,
+  // so the layout never stays chrome-less inside a normal browser window by surprise.
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      if (!document.fullscreenElement) setChromeHidden(false);
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, [setChromeHidden]);
+
+  // Explicit Escape handling covers the fallback case, where there is no native fullscreen
+  // session for the browser's own Escape to end.
+  useEffect(() => {
+    if (!isProjectorMode) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') exitProjectorMode();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isProjectorMode, exitProjectorMode]);
+
+  // Leaving the page must never leave the app fullscreen or chrome-less.
+  useEffect(() => exitProjectorMode, [exitProjectorMode]);
+
+  // In projector mode both the top header and the bottom control bar are position:fixed, so the
+  // page needs top/bottom padding equal to each bar's real, measured height (both wrap onto extra
+  // rows on narrower screens) to keep the first/last step from sitting underneath them.
+  const headerRef = useRef<HTMLElement>(null);
+  const footerRef = useRef<HTMLElement>(null);
+  const headerHeight = useElementHeight(headerRef);
+  const footerHeight = useElementHeight(footerRef);
+
   const [method, setMethod] = useState<'inverse' | 'cramer' | 'gauss'>('inverse');
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [showClassQuestion, setShowClassQuestion] = useState<boolean>(false);
@@ -490,20 +575,47 @@ export default function TeacherPresentation() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white p-4 sm:p-8 flex flex-col justify-between font-sans selection:bg-indigo-500 selection:text-white">
-      {/* Top Presentation Header */}
-      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+    <div
+      className="min-h-screen bg-slate-950 text-white p-4 sm:p-8 2xl:p-12 flex flex-col justify-between font-sans selection:bg-indigo-500 selection:text-white"
+      style={isProjectorMode ? { paddingTop: headerHeight + 24, paddingBottom: footerHeight + 24 } : undefined}
+    >
+      {/* Top Presentation Header — pinned to the top of the viewport in projector mode, mirroring
+          the bottom control bar (see headerHeight/footerHeight above). */}
+      <header
+        ref={headerRef}
+        className={`flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 ${
+          isProjectorMode
+            ? 'fixed top-0 inset-x-0 z-40 bg-slate-950 px-6 2xl:px-12 py-4 shadow-[0_12px_32px_rgba(2,6,23,0.7)]'
+            : 'pb-4'
+        }`}
+      >
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center font-black text-xl shadow-lg shadow-indigo-600/30">
             PROJ
           </div>
           <div>
-            <h1 className="text-xl font-black tracking-tight text-white flex items-center gap-2">
-              โหมดการสอนในชั้นเรียน (Presentation Mode)
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl 2xl:text-2xl font-black tracking-tight text-white">
+                โหมดการสอนในชั้นเรียน (Presentation Mode)
+              </h1>
               <span className="text-xs bg-indigo-900/60 text-indigo-300 border border-indigo-700 px-2.5 py-0.5 rounded-full font-bold">
                 Projector View
               </span>
-            </h1>
+              <button
+                onClick={isProjectorMode ? exitProjectorMode : enterProjectorMode}
+                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors"
+              >
+                {isProjectorMode ? (
+                  <>
+                    <Minimize className="w-3.5 h-3.5" /> ออกจากโหมดเต็มจอ (Esc)
+                  </>
+                ) : (
+                  <>
+                    <Maximize className="w-3.5 h-3.5" /> เข้าสู่โหมดเต็มจอ (Fullscreen)
+                  </>
+                )}
+              </button>
+            </div>
             <p className="text-xs text-slate-400">
               จัดทำโดย ครูเกียรติศักดิ์ แก้วหล้า ครูโรงเรียนอุตรดิตถ์ วิทยฐานะ ครูชำนาญการพิเศษ
             </p>
@@ -575,72 +687,72 @@ export default function TeacherPresentation() {
       </div>
 
       {/* Main Projection Screen Canvas */}
-      <main className="flex-grow my-4 bg-slate-900/90 border border-slate-800/80 rounded-3xl p-6 sm:p-10 shadow-2xl flex flex-col justify-between relative overflow-hidden min-h-[480px]">
+      <main className="flex-grow my-4 bg-slate-900/90 border border-slate-800/80 rounded-3xl p-6 sm:p-10 2xl:p-14 shadow-2xl flex flex-col justify-between relative overflow-hidden min-h-[480px]">
         {/* Background Subtle Grid */}
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] opacity-20 pointer-events-none"></div>
 
-        <div className="relative z-10 space-y-6">
+        <div className="relative z-10 space-y-6 lg:space-y-8">
           {/* Step Counter Indicator */}
           <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-            <span className="text-xs font-black uppercase tracking-widest text-indigo-400">
+            <span className="text-xs lg:text-lg 2xl:text-xl font-black uppercase tracking-widest text-indigo-400">
               {method === 'inverse' && 'วิธีที่ 1: การใช้ Inverse Matrix (A⁻¹B)'}
               {method === 'cramer' && 'วิธีที่ 2: กฎของคราเมอร์ (Cramer\'s Rule)'}
               {method === 'gauss' && 'วิธีที่ 3: Gaussian Elimination & ERO'}
             </span>
-            <span className="text-sm font-black bg-indigo-950 text-indigo-300 border border-indigo-800 px-3 py-1 rounded-full">
+            <span className="text-sm lg:text-xl 2xl:text-2xl font-black bg-indigo-950 text-indigo-300 border border-indigo-800 px-3 py-1 lg:px-5 lg:py-1.5 rounded-full flex-shrink-0">
               ขั้นตอน {currentStep} / {totalSteps}
             </span>
           </div>
 
           {/* STEP 1: Always Present System */}
-          <div className="p-6 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3">
-            <h2 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">1</span>
+          <div className={STEP_CARD}>
+            <h2 className={STEP_HEADING}>
+              <span className={STEP_BADGE}>1</span>
               STEP 1: ระบบสมการเชิงเส้น
             </h2>
             <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 inline-block shadow-inner">
-              <SystemDisplay A={system.A} B={system.B} variables={system.variables} className="text-2xl sm:text-3xl font-black text-amber-300" />
+              <SystemDisplay A={system.A} B={system.B} variables={system.variables} className="text-2xl sm:text-3xl lg:text-4xl 2xl:text-5xl font-black text-amber-300" />
             </div>
           </div>
 
           {/* STEP 2: Method Specific */}
           {currentStep >= 2 && (
-            <div className="p-6 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3 animate-fade-in">
+            <div className={`${STEP_CARD} animate-fade-in`}>
               {method === 'inverse' && (
                 <>
-                  <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">2</span>
+                  <h3 className={STEP_HEADING}>
+                    <span className={STEP_BADGE}>2</span>
                     STEP 2: เขียนระบบสมการในรูป AX = B
                   </h3>
                   <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 inline-block">
-                    <MatrixEquationDisplay A={system.A} B={system.B} variables={system.variables} className="text-xl sm:text-2xl font-bold" />
+                    <MatrixEquationDisplay A={system.A} B={system.B} variables={system.variables} className="text-xl sm:text-2xl lg:text-3xl 2xl:text-4xl font-bold" />
                   </div>
                 </>
               )}
 
               {method === 'cramer' && (
                 <>
-                  <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">2</span>
+                  <h3 className={STEP_HEADING}>
+                    <span className={STEP_BADGE}>2</span>
                     STEP 2: แยกเมทริกซ์สัมประสิทธิ์ A และเวกเตอร์ B
                   </h3>
                   <div className="flex flex-wrap items-center gap-8 py-2">
-                    <MatrixDisplay matrix={system.A} label="A" className="text-xl font-bold" />
-                    <VectorDisplay values={system.B} label="B" className="text-xl font-bold" />
+                    <MatrixDisplay matrix={system.A} label="A" className="text-xl lg:text-3xl 2xl:text-4xl font-bold" />
+                    <VectorDisplay values={system.B} label="B" className="text-xl lg:text-3xl 2xl:text-4xl font-bold" />
                   </div>
                 </>
               )}
 
               {method === 'gauss' && (
                 <>
-                  <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">2</span>
+                  <h3 className={STEP_HEADING}>
+                    <span className={STEP_BADGE}>2</span>
                     STEP 2: สร้างเมทริกซ์แต่งเติม (Augmented Matrix) [A | B]
                   </h3>
                   <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 inline-block">
-                    <AugmentedMatrixDisplay A={system.A} B={system.B} className="text-2xl font-bold text-amber-300" />
+                    <AugmentedMatrixDisplay A={system.A} B={system.B} className="text-2xl lg:text-4xl 2xl:text-5xl font-bold text-amber-300" />
                   </div>
-                  <p className="text-xs text-slate-300 bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                  <p className={`${STEP_NOTE} text-slate-300 bg-slate-900/80 p-3 lg:p-4 rounded-xl border border-slate-800`}>
                     "นำสัมประสิทธิ์ของตัวแปร A ด้านซ้าย และค่าคงที่ B ด้านขวามาเขียนรวมกันโดยใช้เส้นตั้งคั่น"
                   </p>
                 </>
@@ -650,25 +762,25 @@ export default function TeacherPresentation() {
 
           {/* STEP 3: Method Specific */}
           {currentStep >= 3 && (
-            <div className="p-6 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3 animate-fade-in">
+            <div className={`${STEP_CARD} animate-fade-in`}>
               {method === 'inverse' && (
                 <>
-                  <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">3</span>
+                  <h3 className={STEP_HEADING}>
+                    <span className={STEP_BADGE}>3</span>
                     STEP 3: คำนวณค่า Determinant det(A)
                   </h3>
                   <div className="space-y-3">
-                    <div className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 inline-block text-xl">
+                    <div className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 inline-block text-xl lg:text-3xl 2xl:text-4xl">
                       <DeterminantDisplay matrix={system.A} label="\det(A)" className="text-emerald-400 font-bold" />
                     </div>
-                    <div className="text-base font-mono font-bold text-slate-200">
+                    <div className="text-base lg:text-2xl 2xl:text-3xl font-mono font-bold text-slate-200">
                       {dimension === '2x2' ? (
                         <MathView latex={`\\det(A) = (${system.A[0][0]})(${system.A[1][1]}) - (${system.A[0][1]})(${system.A[1][0]}) = ${system.A[0][0]*system.A[1][1]} - ${system.A[0][1]*system.A[1][0]} = ${solution.determinant}`} />
                       ) : (
                         <MathView latex={`\\det(A) = ${solution.determinant}`} />
                       )}
                     </div>
-                    <div className="text-sm font-sans">
+                    <div className="text-sm lg:text-lg 2xl:text-xl font-sans">
                       {solution.determinant === 0 ? (
                         <span className="text-rose-400 font-bold">det(A) = 0 ➔ เมทริกซ์ A ไม่มีตัวผกผัน (A⁻¹ ไม่ดำรงอยู่) ไม่สามารถใช้วิธี Inverse Matrix ได้</span>
                       ) : (
@@ -681,18 +793,18 @@ export default function TeacherPresentation() {
 
               {method === 'cramer' && (
                 <>
-                  <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">3</span>
+                  <h3 className={STEP_HEADING}>
+                    <span className={STEP_BADGE}>3</span>
                     STEP 3: หาค่า D = det(A)
                   </h3>
                   <div className="space-y-3">
-                    <div className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 inline-block text-xl">
+                    <div className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 inline-block text-xl lg:text-3xl 2xl:text-4xl">
                       <DeterminantDisplay matrix={system.A} label="D = \det(A)" className="text-emerald-400 font-bold" />
                     </div>
-                    <div className="text-base font-mono font-bold text-slate-200">
+                    <div className="text-base lg:text-2xl 2xl:text-3xl font-mono font-bold text-slate-200">
                       <MathView latex={`D = ${cramer.detD}`} />
                     </div>
-                    <div className="text-sm font-sans">
+                    <div className="text-sm lg:text-lg 2xl:text-xl font-sans">
                       {cramer.detD === 0 ? (
                         <span className="text-rose-400 font-bold">D = 0 ➔ ไม่สามารถใช้วิธี Cramer หาคำตอบได้โดยตรง</span>
                       ) : (
@@ -718,28 +830,28 @@ export default function TeacherPresentation() {
                     const numCols = system.A[0].length;
 
                     return (
-                      <div key={k} className="p-5 bg-slate-950/80 rounded-2xl border border-indigo-900/60 space-y-4 shadow-lg">
-                        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                          <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-                            <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">
+                      <div key={k} className="p-5 lg:p-7 bg-slate-950/80 rounded-2xl border border-indigo-900/60 space-y-4 shadow-lg">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                          <h3 className={STEP_HEADING}>
+                            <span className={STEP_BADGE}>
                               {3 + k}
                             </span>
                             ขั้นตอนที่ {3 + k}: การดำเนินการกับแถวที่ {k + 1} (Row Operation #{k + 1})
                           </h3>
-                          <span className="text-xs text-slate-400 font-sans"><RenderTextWithMath text={opStep.explanation} /></span>
+                          <span className={`${STEP_NOTE} text-slate-400 font-sans`}><RenderTextWithMath text={opStep.explanation} /></span>
                         </div>
 
                         {/* ONE HORIZONTAL ROW FOR BEFORE -> OPERATION -> AFTER */}
                         <div className="flex flex-col md:flex-row items-center justify-between gap-3 overflow-x-auto py-2">
                           {/* 1. BEFORE MATRIX (Always visible once step starts) */}
-                          <div className="flex-1 w-full p-4 bg-slate-900/90 rounded-xl border border-slate-800 flex flex-col items-center justify-center min-h-[120px]">
-                            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                          <div className="flex-1 w-full p-4 bg-slate-900/90 rounded-xl border border-slate-800 flex flex-col items-center justify-center min-h-[120px] lg:min-h-[180px] lg:p-6">
+                            <p className="text-[11px] lg:text-sm 2xl:text-base font-bold text-slate-400 uppercase tracking-wider mb-2">
                               1. เมทริกซ์ก่อนดำเนินการ (BEFORE)
                             </p>
                             <AugmentedMatrixDisplay
                               A={beforeMat.map(r => r.slice(0, numCols))}
                               B={beforeMat.map(r => r[numCols])}
-                              className="text-xl font-bold text-slate-200"
+                              className="text-xl lg:text-2xl 2xl:text-3xl font-bold text-slate-200"
                               highlightRows={opStep.highlightRows}
                             />
                           </div>
@@ -748,20 +860,20 @@ export default function TeacherPresentation() {
                           <div className="text-indigo-400 font-bold text-2xl px-1 hidden md:block">→</div>
 
                           {/* 2. ROW OPERATION (Hidden until State B) */}
-                          <div className={`flex-1 w-full p-4 rounded-xl border flex flex-col items-center justify-center min-h-[120px] transition-all ${
+                          <div className={`flex-1 w-full p-4 rounded-xl border flex flex-col items-center justify-center min-h-[120px] lg:min-h-[180px] lg:p-6 transition-all ${
                             isOpRevealed 
                               ? 'bg-indigo-950/70 border-indigo-600/80 text-amber-300 shadow-md shadow-indigo-950/50' 
                               : 'bg-slate-900/40 border-slate-800/80 text-slate-600'
                           }`}>
-                            <p className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider mb-2">
+                            <p className="text-[11px] lg:text-sm 2xl:text-base font-bold text-indigo-300 uppercase tracking-wider mb-2">
                               2. คำสั่ง ERO (ROW OPERATION)
                             </p>
                             {isOpRevealed ? (
-                              <div className="text-2xl font-mono font-black text-amber-300">
+                              <div className="text-2xl lg:text-3xl 2xl:text-4xl font-mono font-black text-amber-300">
                                 <MathView latex={`\\mathbf{${opStep.operationPerformed}}`} />
                               </div>
                             ) : (
-                              <div className="text-xs font-mono italic text-slate-500 bg-slate-950/60 px-3 py-1.5 rounded-lg border border-slate-800">
+                              <div className="text-xs lg:text-sm 2xl:text-base font-mono italic text-slate-500 bg-slate-950/60 px-3 py-1.5 rounded-lg border border-slate-800">
                                 🔒 กด "แสดงขั้นตอนถัดไป" เพื่อเปิดเผย ERO
                               </div>
                             )}
@@ -771,22 +883,22 @@ export default function TeacherPresentation() {
                           <div className="text-indigo-400 font-bold text-2xl px-1 hidden md:block">→</div>
 
                           {/* 3. AFTER MATRIX (Hidden until State C) */}
-                          <div className={`flex-1 w-full p-4 rounded-xl border flex flex-col items-center justify-center min-h-[120px] transition-all ${
+                          <div className={`flex-1 w-full p-4 rounded-xl border flex flex-col items-center justify-center min-h-[120px] lg:min-h-[180px] lg:p-6 transition-all ${
                             isAfterRevealed 
                               ? 'bg-slate-900/90 border-emerald-500/70 text-emerald-400 shadow-md shadow-emerald-950/30' 
                               : 'bg-slate-900/40 border-slate-800/80 text-slate-600'
                           }`}>
-                            <p className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider mb-2">
+                            <p className="text-[11px] lg:text-sm 2xl:text-base font-bold text-emerald-400 uppercase tracking-wider mb-2">
                               3. เมทริกซ์หลังดำเนินการ (AFTER)
                             </p>
                             {isAfterRevealed ? (
                               <AugmentedMatrixDisplay
                                 A={afterMat.map(r => r.slice(0, numCols))}
                                 B={afterMat.map(r => r[numCols])}
-                                className="text-xl font-bold text-emerald-400"
+                                className="text-xl lg:text-2xl 2xl:text-3xl font-bold text-emerald-400"
                               />
                             ) : (
-                              <div className="text-xs font-mono italic text-slate-500 bg-slate-950/60 px-3 py-1.5 rounded-lg border border-slate-800">
+                              <div className="text-xs lg:text-sm 2xl:text-base font-mono italic text-slate-500 bg-slate-950/60 px-3 py-1.5 rounded-lg border border-slate-800">
                                 🔒 กด "แสดงขั้นตอนถัดไป" เพื่อเปิดเผยผลลัพธ์
                               </div>
                             )}
@@ -798,9 +910,9 @@ export default function TeacherPresentation() {
 
                   {/* RREF Analysis Step */}
                   {currentStep >= (gaussNumOperations === 0 ? 3 : 3 + 3 * gaussNumOperations) && (
-                    <div className="p-6 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3 animate-fade-in">
-                      <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">
+                    <div className={`${STEP_CARD} animate-fade-in`}>
+                      <h3 className={STEP_HEADING}>
+                        <span className={STEP_BADGE}>
                           {gaussNumOperations === 0 ? 3 : 3 + gaussNumOperations}
                         </span>
                         วิเคราะห์ผลลัพธ์จากเมทริกซ์ RREF
@@ -809,19 +921,19 @@ export default function TeacherPresentation() {
                         <AugmentedMatrixDisplay
                           A={rrefMatrix.map(r => r.slice(0, system.A.length))}
                           B={rrefMatrix.map(r => r[system.A.length])}
-                          className="text-2xl font-bold text-emerald-400"
+                          className="text-2xl lg:text-4xl 2xl:text-5xl font-bold text-emerald-400"
                         />
                       </div>
-                      <div className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2 font-mono text-base font-bold text-white">
+                      <div className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2 lg:space-y-3 font-mono text-base lg:text-2xl 2xl:text-3xl font-bold text-white">
                         {solution.type === 'no_solution' && (
                           <div className="space-y-2">
                             <p className="text-amber-300">
                               แถวสุดท้ายแปลความหมายเป็นสมการ: <MathView latex={`0x + 0y ${dimension === '3x3' ? '+ 0z' : ''} = ${formatLatexFraction(rrefMatrix[rrefMatrix.length - 1][system.A.length])}`} />
                             </p>
-                            <p className="text-rose-400 font-sans text-sm font-normal">
+                            <p className="text-rose-400 font-sans text-sm lg:text-lg 2xl:text-xl font-normal">
                               "สมการนี้เป็นไปไม่ได้ เพราะ 0 ไม่สามารถเท่ากับ {formatLatexFraction(rrefMatrix[rrefMatrix.length - 1][system.A.length])}"
                             </p>
-                            <div className="mt-2 text-xl text-rose-400">
+                            <div className="mt-2 text-xl lg:text-3xl 2xl:text-4xl text-rose-400">
                               <MathView latex={`\\boxed{\\text{ไม่มีคำตอบ (No Solution)}}`} />
                             </div>
                           </div>
@@ -832,10 +944,10 @@ export default function TeacherPresentation() {
                             <p className="text-amber-300">
                               แถวสุดท้ายแปลความหมายเป็นสมการ: <MathView latex={`0x + 0y ${dimension === '3x3' ? '+ 0z' : ''} = 0`} />
                             </p>
-                            <p className="text-emerald-400 font-sans text-sm font-normal">
+                            <p className="text-emerald-400 font-sans text-sm lg:text-lg 2xl:text-xl font-normal">
                               "ข้อความ 0 = 0 เป็นจริงเสมอ สมการมีความสัมพันธ์ซ้ำซ้อนกัน"
                             </p>
-                            <div className="mt-2 text-xl text-emerald-400">
+                            <div className="mt-2 text-xl lg:text-3xl 2xl:text-4xl text-emerald-400">
                               <MathView latex={`\\boxed{\\text{มีคำตอบนับไม่ถ้วน (Infinitely Many Solutions)}}`} />
                             </div>
                           </div>
@@ -843,13 +955,13 @@ export default function TeacherPresentation() {
 
                         {solution.type === 'unique' && solution.solution && (
                           <div className="space-y-2">
-                            <p className="text-slate-300 font-sans text-xs mb-2">แปลผลจากเมทริกซ์เอกลักษณ์ RREF:</p>
+                            <p className={`${STEP_NOTE} text-slate-300 font-sans mb-2`}>แปลผลจากเมทริกซ์เอกลักษณ์ RREF:</p>
                             <p><MathView latex={`1x = ${formatLatexFraction(solution.solution[0])} \\implies x = ${formatLatexFraction(solution.solution[0])}`} /></p>
                             <p><MathView latex={`1y = ${formatLatexFraction(solution.solution[1])} \\implies y = ${formatLatexFraction(solution.solution[1])}`} /></p>
                             {dimension === '3x3' && solution.solution[2] !== undefined && (
                               <p><MathView latex={`1z = ${formatLatexFraction(solution.solution[2])} \\implies z = ${formatLatexFraction(solution.solution[2])}`} /></p>
                             )}
-                            <div className="mt-2 text-xl text-emerald-400">
+                            <div className="mt-2 text-xl lg:text-3xl 2xl:text-4xl text-emerald-400">
                               <MathView latex={`\\boxed{\\text{มีคำตอบเพียงชุดเดียว (Unique Solution)}}`} />
                             </div>
                           </div>
@@ -860,23 +972,23 @@ export default function TeacherPresentation() {
 
                   {/* Gauss Verification Step */}
                   {currentStep >= (gaussNumOperations === 0 ? 4 : 4 + 3 * gaussNumOperations) && (
-                    <div className="p-6 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3 animate-fade-in">
-                      <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">
+                    <div className={`${STEP_CARD} animate-fade-in`}>
+                      <h3 className={STEP_HEADING}>
+                        <span className={STEP_BADGE}>
                           {gaussNumOperations === 0 ? 4 : 4 + gaussNumOperations}
                         </span>
                         สรุปและตรวจคำตอบระบบสมการ
                       </h3>
                       {solution.type === 'unique' && solution.solution && (
                         <div className="p-6 bg-gradient-to-r from-emerald-950/80 to-slate-950 border-2 border-emerald-500 rounded-2xl shadow-2xl space-y-3">
-                          <span className="text-xs font-black uppercase text-emerald-400 tracking-widest">
+                          <span className="text-xs lg:text-base 2xl:text-lg font-black uppercase text-emerald-400 tracking-widest">
                             คำตอบของระบบสมการ (VERIFIED SOLUTION)
                           </span>
-                          <div className="text-2xl font-mono font-black text-white">
+                          <div className="text-2xl lg:text-4xl 2xl:text-5xl font-mono font-black text-white">
                             <MathView latex={`X = \\begin{bmatrix} ${solution.solution.map(s => formatLatexFraction(s)).join(' \\\\[0.5em] ')} \\end{bmatrix}`} />
                           </div>
                           {solution.verifications && (
-                            <div className="pt-3 border-t border-emerald-900/50 space-y-1 text-xs text-emerald-200/80 font-mono">
+                            <div className="pt-3 border-t border-emerald-900/50 space-y-1 text-xs lg:text-base 2xl:text-lg text-emerald-200/80 font-mono">
                               <p className="font-sans font-bold text-emerald-400 mb-1">การแทนค่าตรวจคำตอบในสมการ:</p>
                               {solution.verifications.map((v, idx) => (
                                 <p key={idx}>
@@ -894,30 +1006,31 @@ export default function TeacherPresentation() {
             </div>
           )}
 
-          {/* STEP 4: Method Specific */}
-          {currentStep >= 4 && (
-            <div className="p-6 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3 animate-fade-in">
+          {/* STEP 4: Method Specific. Steps 4-6 only have Inverse/Cramer content — Gauss renders
+              all of its later steps inside STEP 3 above, so they're skipped (else empty cards). */}
+          {currentStep >= 4 && method !== 'gauss' && (
+            <div className={`${STEP_CARD} animate-fade-in`}>
               {method === 'inverse' && (
                 <>
-                  <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">4</span>
+                  <h3 className={STEP_HEADING}>
+                    <span className={STEP_BADGE}>4</span>
                     STEP 4: หา Adjugate Matrix adj(A)
                   </h3>
                   {inverse.hasInverse && inverse.adjugateA ? (
                     <div className="space-y-3">
                       {dimension === '2x2' ? (
-                        <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 text-xs text-slate-300 font-mono">
+                        <div className="p-3 lg:p-5 bg-slate-900 rounded-xl border border-slate-800 text-xs lg:text-xl 2xl:text-2xl text-slate-300 font-mono overflow-x-auto">
                           <MathView latex={`\\text{สูตรสำหรับ 2x2: } A = \\begin{bmatrix} a & b \\\\[0.5em] c & d \\end{bmatrix} \\implies \\operatorname{adj}(A) = \\begin{bmatrix} d & -b \\\\[0.5em] -c & a \\end{bmatrix}`} />
                         </div>
                       ) : (
-                        <p className="text-xs text-slate-400">หาจากการสลับเปลี่ยนของเมทริกซ์โคแฟกเตอร์ (Transpose of Cofactors)</p>
+                        <p className={`${STEP_NOTE} text-slate-400`}>หาจากการสลับเปลี่ยนของเมทริกซ์โคแฟกเตอร์ (Transpose of Cofactors)</p>
                       )}
                       <div className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 inline-block">
-                        <MatrixDisplay matrix={inverse.adjugateA} symbol="\operatorname{adj}(A)" className="text-xl font-bold text-emerald-400" />
+                        <MatrixDisplay matrix={inverse.adjugateA} symbol="\operatorname{adj}(A)" className="text-xl lg:text-3xl 2xl:text-4xl font-bold text-emerald-400" />
                       </div>
                     </div>
                   ) : (
-                    <p className="text-rose-400 text-sm p-3 bg-rose-950/40 rounded-xl border border-rose-800">
+                    <p className="text-rose-400 text-sm lg:text-lg 2xl:text-xl p-3 bg-rose-950/40 rounded-xl border border-rose-800">
                       ไม่สามารถหา adj(A) เพื่อใช้คำนวณ A⁻¹ ได้เนื่องจาก det(A) = 0
                     </p>
                   )}
@@ -926,30 +1039,30 @@ export default function TeacherPresentation() {
 
               {method === 'cramer' && (
                 <>
-                  <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">4</span>
+                  <h3 className={STEP_HEADING}>
+                    <span className={STEP_BADGE}>4</span>
                     STEP 4: สร้าง Dₓ, Dᵧ {dimension === '3x3' ? ', D_z' : ''} และคำนวณ Determinant
                   </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 font-mono text-base font-bold">
-                    <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
-                      <p className="text-xs text-slate-400 font-sans">แทนที่คอลัมน์ที่ 1 ด้วย B:</p>
-                      <DeterminantDisplay matrix={cramer.matrixDx} label="D_x = \det(D_x)" className="text-lg" />
-                      <div className="pt-2 border-t border-slate-800 text-emerald-400 text-sm">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 font-mono text-base lg:text-xl 2xl:text-2xl font-bold">
+                    <div className="p-4 lg:p-6 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
+                      <p className={`${STEP_NOTE} text-slate-400 font-sans`}>แทนที่คอลัมน์ที่ 1 ด้วย B:</p>
+                      <DeterminantDisplay matrix={cramer.matrixDx} label="D_x = \det(D_x)" className="text-lg lg:text-2xl 2xl:text-3xl" />
+                      <div className="pt-2 border-t border-slate-800 text-emerald-400 text-sm lg:text-xl 2xl:text-2xl">
                         <MathView latex={`\\det(D_x) = ${cramer.detDx}`} />
                       </div>
                     </div>
-                    <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
-                      <p className="text-xs text-slate-400 font-sans">แทนที่คอลัมน์ที่ 2 ด้วย B:</p>
-                      <DeterminantDisplay matrix={cramer.matrixDy} label="D_y = \det(D_y)" className="text-lg" />
-                      <div className="pt-2 border-t border-slate-800 text-emerald-400 text-sm">
+                    <div className="p-4 lg:p-6 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
+                      <p className={`${STEP_NOTE} text-slate-400 font-sans`}>แทนที่คอลัมน์ที่ 2 ด้วย B:</p>
+                      <DeterminantDisplay matrix={cramer.matrixDy} label="D_y = \det(D_y)" className="text-lg lg:text-2xl 2xl:text-3xl" />
+                      <div className="pt-2 border-t border-slate-800 text-emerald-400 text-sm lg:text-xl 2xl:text-2xl">
                         <MathView latex={`\\det(D_y) = ${cramer.detDy}`} />
                       </div>
                     </div>
                     {dimension === '3x3' && cramer.matrixDz && (
-                      <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
-                        <p className="text-xs text-slate-400 font-sans">แทนที่คอลัมน์ที่ 3 ด้วย B:</p>
-                        <DeterminantDisplay matrix={cramer.matrixDz} label="D_z = \det(D_z)" className="text-lg" />
-                        <div className="pt-2 border-t border-slate-800 text-emerald-400 text-sm">
+                      <div className="p-4 lg:p-6 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
+                        <p className={`${STEP_NOTE} text-slate-400 font-sans`}>แทนที่คอลัมน์ที่ 3 ด้วย B:</p>
+                        <DeterminantDisplay matrix={cramer.matrixDz} label="D_z = \det(D_z)" className="text-lg lg:text-2xl 2xl:text-3xl" />
+                        <div className="pt-2 border-t border-slate-800 text-emerald-400 text-sm lg:text-xl 2xl:text-2xl">
                           <MathView latex={`\\det(D_z) = ${cramer.detDz}`} />
                         </div>
                       </div>
@@ -961,26 +1074,26 @@ export default function TeacherPresentation() {
           )}
 
           {/* STEP 5: Method Specific */}
-          {currentStep >= 5 && (
-            <div className="p-6 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3 animate-fade-in">
+          {currentStep >= 5 && method !== 'gauss' && (
+            <div className={`${STEP_CARD} animate-fade-in`}>
               {method === 'inverse' && (
                 <>
-                  <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">5</span>
+                  <h3 className={STEP_HEADING}>
+                    <span className={STEP_BADGE}>5</span>
                     STEP 5: คำนวณ A⁻¹ (Inverse Matrix)
                   </h3>
                   {inverse.hasInverse && inverse.inverseA && inverse.adjugateA ? (
                     <div className="space-y-3">
-                      <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 text-sm font-mono text-indigo-300">
+                      <div className="p-3 lg:p-5 bg-slate-900 rounded-xl border border-slate-800 text-sm lg:text-2xl 2xl:text-3xl font-mono text-indigo-300 overflow-x-auto">
                         <MathView latex={`A^{-1} = \\frac{1}{\\det(A)} \\cdot \\operatorname{adj}(A) = \\frac{1}{${solution.determinant}} \\begin{bmatrix} ${inverse.adjugateA.map(r => r.join(' & ')).join(' \\\\[0.5em] ')} \\end{bmatrix}`} />
                       </div>
-                      <p className="text-xs text-slate-400">แทนค่าในรูปเศษส่วนอย่างต่ำ (Exact Fractions):</p>
+                      <p className={`${STEP_NOTE} text-slate-400`}>แทนค่าในรูปเศษส่วนอย่างต่ำ (Exact Fractions):</p>
                       <div className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 inline-block">
-                        <MatrixDisplay matrix={inverse.inverseA} symbol="A^{-1}" className="text-xl font-bold text-emerald-400" />
+                        <MatrixDisplay matrix={inverse.inverseA} symbol="A^{-1}" className="text-xl lg:text-3xl 2xl:text-4xl font-bold text-emerald-400" />
                       </div>
                     </div>
                   ) : (
-                    <p className="text-rose-400 text-sm p-3 bg-rose-950/40 rounded-xl border border-rose-800">
+                    <p className="text-rose-400 text-sm lg:text-lg 2xl:text-xl p-3 bg-rose-950/40 rounded-xl border border-rose-800">
                       ไม่สามารถคำนวณ A⁻¹ ได้เนื่องจาก det(A) = 0
                     </p>
                   )}
@@ -989,12 +1102,12 @@ export default function TeacherPresentation() {
 
               {method === 'cramer' && (
                 <>
-                  <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">5</span>
+                  <h3 className={STEP_HEADING}>
+                    <span className={STEP_BADGE}>5</span>
                     STEP 5: คำนวณหาค่าตัวแปร
                   </h3>
                   {cramer.detD !== 0 ? (
-                    <div className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 font-mono text-lg font-bold text-indigo-300 space-y-3 inline-block">
+                    <div className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 font-mono text-lg lg:text-2xl 2xl:text-3xl font-bold text-indigo-300 space-y-3 inline-block">
                       <p><MathView latex={`x = \\frac{D_x}{D} = \\frac{${cramer.detDx}}{${cramer.detD}} = ${formatLatexFraction(cramer.detDx / cramer.detD)}`} /></p>
                       <p><MathView latex={`y = \\frac{D_y}{D} = \\frac{${cramer.detDy}}{${cramer.detD}} = ${formatLatexFraction(cramer.detDy / cramer.detD)}`} /></p>
                       {dimension === '3x3' && cramer.detDz !== undefined && (
@@ -1002,7 +1115,7 @@ export default function TeacherPresentation() {
                       )}
                     </div>
                   ) : (
-                    <p className="text-rose-400 text-sm">ไม่สามารถคำนวณได้เนื่องจาก D = 0 (ตัวหารเป็นศูนย์)</p>
+                    <p className="text-rose-400 text-sm lg:text-lg 2xl:text-xl">ไม่สามารถคำนวณได้เนื่องจาก D = 0 (ตัวหารเป็นศูนย์)</p>
                   )}
                 </>
               )}
@@ -1010,53 +1123,53 @@ export default function TeacherPresentation() {
           )}
 
           {/* STEP 6: Method Specific */}
-          {currentStep >= 6 && (
-            <div className="p-6 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3 animate-fade-in">
+          {currentStep >= 6 && method !== 'gauss' && (
+            <div className={`${STEP_CARD} animate-fade-in`}>
               {method === 'inverse' && (
                 <>
-                  <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">6</span>
+                  <h3 className={STEP_HEADING}>
+                    <span className={STEP_BADGE}>6</span>
                     STEP 6: คำนวณ X = A⁻¹B
                   </h3>
                   {inverse.hasInverse && solution.solution && inverse.inverseA ? (
                     <div className="space-y-3">
-                      <div className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 text-lg font-mono font-bold text-indigo-300 space-y-3 inline-block">
+                      <div className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 text-lg lg:text-2xl 2xl:text-3xl font-mono font-bold text-indigo-300 space-y-3 inline-block">
                         <MathView
                           latex={`X = A^{-1}B = \\begin{bmatrix} ${inverse.inverseA.map(r => r.map(v => formatLatexFraction(v)).join(' & ')).join(' \\\\[0.5em] ')} \\end{bmatrix} \\begin{bmatrix} ${system.B.map(b => formatLatexFraction(b)).join(' \\\\[0.5em] ')} \\end{bmatrix}`}
                         />
                       </div>
-                      <div className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 text-xl font-mono font-extrabold text-emerald-400 inline-block ml-4">
+                      <div className="p-4 bg-slate-900/90 rounded-xl border border-slate-800 text-xl lg:text-3xl 2xl:text-4xl font-mono font-extrabold text-emerald-400 inline-block ml-4">
                         <MathView
                           latex={`\\boxed{X = \\begin{bmatrix} ${solution.solution.map(s => formatLatexFraction(s)).join(' \\\\[0.5em] ')} \\end{bmatrix}}`}
                         />
                       </div>
                     </div>
                   ) : (
-                    <p className="text-rose-400 text-sm">ไม่สามารถคำนวณ X = A⁻¹B ได้เนื่องจากไม่มี A⁻¹</p>
+                    <p className="text-rose-400 text-sm lg:text-lg 2xl:text-xl">ไม่สามารถคำนวณ X = A⁻¹B ได้เนื่องจากไม่มี A⁻¹</p>
                   )}
                 </>
               )}
 
               {method === 'cramer' && (
                 <>
-                  <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">6</span>
+                  <h3 className={STEP_HEADING}>
+                    <span className={STEP_BADGE}>6</span>
                     STEP 6: สรุปและตรวจคำตอบระบบสมการ
                   </h3>
 
                   {solution.type === 'unique' && solution.solution && (
                     <div className="p-6 bg-gradient-to-r from-emerald-950/80 to-slate-950 border-2 border-emerald-500 rounded-2xl shadow-2xl flex flex-wrap items-center justify-between gap-4">
                       <div>
-                        <span className="text-xs font-black uppercase text-emerald-400 tracking-widest">
+                        <span className="text-xs lg:text-base 2xl:text-lg font-black uppercase text-emerald-400 tracking-widest">
                           คำตอบของระบบสมการ (VERIFIED SOLUTION)
                         </span>
-                        <div className="text-2xl sm:text-3xl font-mono font-black text-white mt-1">
+                        <div className="text-2xl sm:text-3xl lg:text-4xl 2xl:text-5xl font-mono font-black text-white mt-1">
                           x = {formatLatexFraction(solution.solution[0])},{' '}
                           y = {formatLatexFraction(solution.solution[1])}
                           {dimension === '3x3' && `, z = ${formatLatexFraction(solution.solution[2])}`}
                         </div>
                         {solution.verifications && (
-                          <div className="mt-3 pt-3 border-t border-emerald-900/50 space-y-1 text-xs text-emerald-200/80 font-mono">
+                          <div className="mt-3 pt-3 border-t border-emerald-900/50 space-y-1 text-xs lg:text-base 2xl:text-lg text-emerald-200/80 font-mono">
                             <p className="font-sans font-bold text-emerald-400 mb-1">การแทนค่าตรวจคำตอบในสมการ:</p>
                             {solution.verifications.map((v, idx) => (
                               <p key={idx}>
@@ -1066,7 +1179,7 @@ export default function TeacherPresentation() {
                           </div>
                         )}
                       </div>
-                      <div className="w-12 h-12 rounded-full bg-emerald-500 text-slate-950 font-black text-2xl flex items-center justify-center shadow-lg">
+                      <div className="w-12 h-12 lg:w-16 lg:h-16 rounded-full bg-emerald-500 text-slate-950 font-black text-2xl lg:text-4xl flex items-center justify-center shadow-lg">
                         ✓
                       </div>
                     </div>
@@ -1078,25 +1191,25 @@ export default function TeacherPresentation() {
 
           {/* STEP 7: Inverse Summary & Verification */}
           {currentStep >= 7 && method === 'inverse' && (
-            <div className="p-6 bg-slate-950/60 rounded-2xl border border-slate-800 space-y-3 animate-fade-in">
-              <h3 className="text-xs font-bold text-indigo-300 uppercase tracking-widest flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">7</span>
+            <div className={`${STEP_CARD} animate-fade-in`}>
+              <h3 className={STEP_HEADING}>
+                <span className={STEP_BADGE}>7</span>
                 STEP 7: สรุปและตรวจคำตอบระบบสมการ
               </h3>
 
               {solution.type === 'unique' && solution.solution && (
                 <div className="p-6 bg-gradient-to-r from-emerald-950/80 to-slate-950 border-2 border-emerald-500 rounded-2xl shadow-2xl flex flex-wrap items-center justify-between gap-4">
                   <div>
-                    <span className="text-xs font-black uppercase text-emerald-400 tracking-widest">
+                    <span className="text-xs lg:text-base 2xl:text-lg font-black uppercase text-emerald-400 tracking-widest">
                       คำตอบของระบบสมการ (VERIFIED SOLUTION)
                     </span>
-                    <div className="text-2xl sm:text-3xl font-mono font-black text-white mt-1">
+                    <div className="text-2xl sm:text-3xl lg:text-4xl 2xl:text-5xl font-mono font-black text-white mt-1">
                       x = {formatLatexFraction(solution.solution[0])},{' '}
                       y = {formatLatexFraction(solution.solution[1])}
                       {dimension === '3x3' && `, z = ${formatLatexFraction(solution.solution[2])}`}
                     </div>
                     {solution.verifications && (
-                      <div className="mt-3 pt-3 border-t border-emerald-900/50 space-y-1 text-xs text-emerald-200/80 font-mono">
+                      <div className="mt-3 pt-3 border-t border-emerald-900/50 space-y-1 text-xs lg:text-base 2xl:text-lg text-emerald-200/80 font-mono">
                         <p className="font-sans font-bold text-emerald-400 mb-1">การแทนค่าตรวจคำตอบในสมการ:</p>
                         {solution.verifications.map((v, idx) => (
                           <p key={idx}>
@@ -1106,7 +1219,7 @@ export default function TeacherPresentation() {
                       </div>
                     )}
                   </div>
-                  <div className="w-12 h-12 rounded-full bg-emerald-500 text-slate-950 font-black text-2xl flex items-center justify-center shadow-lg">
+                  <div className="w-12 h-12 lg:w-16 lg:h-16 rounded-full bg-emerald-500 text-slate-950 font-black text-2xl lg:text-4xl flex items-center justify-center shadow-lg">
                     ✓
                   </div>
                 </div>
@@ -1119,10 +1232,10 @@ export default function TeacherPresentation() {
         {showClassQuestion && (() => {
           const qObj = getClassroomQuestion(method, currentStep);
           return (
-            <div className="mt-8 p-6 bg-indigo-950/90 border-2 border-indigo-500 rounded-2xl relative z-20 space-y-4 shadow-2xl animate-fade-in">
+            <div className="mt-8 p-6 lg:p-8 2xl:p-10 bg-indigo-950/90 border-2 border-indigo-500 rounded-2xl relative z-20 space-y-4 lg:space-y-6 shadow-2xl animate-fade-in">
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <span className="text-xs font-black uppercase tracking-widest text-indigo-300 flex items-center gap-2">
-                  <HelpCircle className="w-4 h-4 text-amber-400" /> ถามชั้นเรียน (Ask the Class) — ขั้นตอนที่ {currentStep}
+                <span className="text-xs lg:text-base 2xl:text-lg font-black uppercase tracking-widest text-indigo-300 flex items-center gap-2">
+                  <HelpCircle className="w-4 h-4 lg:w-5 lg:h-5 text-amber-400" /> ถามชั้นเรียน (Ask the Class) — ขั้นตอนที่ {currentStep}
                 </span>
                 <div className="flex items-center gap-2">
                   {!livePollId && (
@@ -1145,21 +1258,21 @@ export default function TeacherPresentation() {
                 </div>
               </div>
 
-              <p className="text-lg font-bold text-white">
+              <p className="text-lg lg:text-2xl 2xl:text-3xl font-bold text-white">
                 "{qObj.question}"
               </p>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-bold">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:gap-4 text-xs lg:text-lg 2xl:text-xl font-bold">
                 {qObj.options.map((opt, oIdx) => (
-                  <div key={oIdx} className="p-3 bg-slate-900 rounded-xl border border-slate-700 text-slate-200">
+                  <div key={oIdx} className="p-3 lg:p-5 bg-slate-900 rounded-xl border border-slate-700 text-slate-200">
                     {opt}
                   </div>
                 ))}
               </div>
 
               {questionRevealed && (
-                <div className="p-4 bg-emerald-950/80 border border-emerald-500 rounded-xl text-xs text-emerald-200 animate-fade-in">
-                  <p className="font-extrabold text-sm text-emerald-400">✓ คำตอบที่ถูกต้อง: {qObj.correctAnswer}</p>
+                <div className="p-4 lg:p-6 bg-emerald-950/80 border border-emerald-500 rounded-xl text-xs lg:text-lg 2xl:text-xl text-emerald-200 animate-fade-in">
+                  <p className="font-extrabold text-sm lg:text-xl 2xl:text-2xl text-emerald-400">✓ คำตอบที่ถูกต้อง: {qObj.correctAnswer}</p>
                   <p className="mt-1">
                     คำอธิบาย: {qObj.explanation}
                   </p>
@@ -1170,15 +1283,15 @@ export default function TeacherPresentation() {
                   bars are plain width-scaled divs — just 2-4 options, no charting library
                   needed, matching the visual style already used for progress bars elsewhere. */}
               {livePollId && (
-                <div className="p-4 bg-rose-950/60 border border-rose-500/60 rounded-xl space-y-4 animate-fade-in">
-                  <div className="flex flex-col sm:flex-row items-center gap-4">
+                <div className="p-4 lg:p-6 bg-rose-950/60 border border-rose-500/60 rounded-xl space-y-4 animate-fade-in">
+                  <div className="flex flex-col sm:flex-row items-center gap-4 lg:gap-8">
                     {pollQrDataUrl && (
                       <div className="bg-white p-2 rounded-xl flex-shrink-0">
-                        <img src={pollQrDataUrl} alt="QR สำหรับตอบคำถามสด" className="w-32 h-32" />
+                        <img src={pollQrDataUrl} alt="QR สำหรับตอบคำถามสด" className="w-32 h-32 lg:w-48 lg:h-48 2xl:w-60 2xl:h-60" />
                       </div>
                     )}
-                    <div className="flex-grow w-full space-y-2">
-                      <p className="text-xs font-black text-rose-300 uppercase tracking-widest">
+                    <div className="flex-grow w-full space-y-2 lg:space-y-4">
+                      <p className="text-xs lg:text-lg 2xl:text-xl font-black text-rose-300 uppercase tracking-widest">
                         กำลังรับคำตอบสด — {pollResults?.totalAnswers ?? 0} คนตอบแล้ว
                       </p>
                       {pollResults?.options.map((opt) => {
@@ -1188,11 +1301,11 @@ export default function TeacherPresentation() {
                         const pct = Math.round((count / maxCount) * 100);
                         return (
                           <div key={opt} className="space-y-1">
-                            <div className="flex justify-between text-[11px] font-bold text-slate-200">
+                            <div className="flex justify-between text-[11px] lg:text-base 2xl:text-lg font-bold text-slate-200">
                               <span className="truncate pr-2">{opt}</span>
                               <span>{count}</span>
                             </div>
-                            <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                            <div className="w-full h-2.5 lg:h-4 2xl:h-5 bg-slate-800 rounded-full overflow-hidden">
                               <div
                                 className="h-full bg-rose-500 rounded-full transition-all duration-500"
                                 style={{ width: `${pct}%` }}
@@ -1215,19 +1328,19 @@ export default function TeacherPresentation() {
               )}
 
               {pollCloseSummary && (
-                <div className="p-4 bg-emerald-950/60 border border-emerald-500/60 rounded-xl space-y-2 animate-fade-in">
-                  <p className="text-xs font-black text-emerald-300 uppercase tracking-widest flex items-center gap-1.5">
-                    <Trophy className="w-4 h-4" /> ผลคำตอบสด ({pollCloseSummary.totalAnswers} คนตอบ)
+                <div className="p-4 lg:p-6 bg-emerald-950/60 border border-emerald-500/60 rounded-xl space-y-2 lg:space-y-3 animate-fade-in">
+                  <p className="text-xs lg:text-lg 2xl:text-xl font-black text-emerald-300 uppercase tracking-widest flex items-center gap-1.5">
+                    <Trophy className="w-4 h-4 lg:w-5 lg:h-5" /> ผลคำตอบสด ({pollCloseSummary.totalAnswers} คนตอบ)
                   </p>
                   <div className="space-y-1">
                     {Object.entries(pollCloseSummary.voteCounts).map(([opt, count]) => (
-                      <p key={opt} className="text-[11px] font-bold text-slate-200">
+                      <p key={opt} className="text-[11px] lg:text-base 2xl:text-lg font-bold text-slate-200">
                         {opt === pollCloseSummary.correctAnswer ? '✓ ' : ''}
                         {opt}: {count} คน
                       </p>
                     ))}
                   </div>
-                  <p className="text-xs text-emerald-200 pt-1">
+                  <p className="text-xs lg:text-base 2xl:text-lg text-emerald-200 pt-1">
                     {pollCloseSummary.correctDisplayNames.length > 0
                       ? `ตอบถูก: ${pollCloseSummary.correctDisplayNames.join(', ')}`
                       : 'ยังไม่มีใครตอบถูกในรอบนี้'}
@@ -1240,7 +1353,14 @@ export default function TeacherPresentation() {
       </main>
 
       {/* Teacher Bottom Control Panel */}
-      <footer className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
+      <footer
+        ref={footerRef}
+        className={`bg-slate-900 border-slate-800 p-4 flex flex-wrap items-center justify-between gap-4 ${
+          isProjectorMode
+            ? 'fixed bottom-0 inset-x-0 z-40 border-t px-6 2xl:px-12 shadow-[0_-12px_32px_rgba(2,6,23,0.7)]'
+            : 'border rounded-2xl'
+        }`}
+      >
         <div className="flex items-center gap-2">
           <button
             onClick={handlePrevStep}

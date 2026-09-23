@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Full-bleed variant for Android adaptive-icon masking and iOS apple-touch-icon (both apply
+       their own corner shape; transparent corners would render black on iOS). The "M" is the
+       same geometry as icon.svg — its corners sit ~163px from center, inside the 205px (40%)
+       maskable safe-zone circle, so no mask shape can crop it. -->
+  <rect width="512" height="512" fill="#4f39f6"/>
+  <path fill="#fff" d="M136 366V146h64l56 90 56-90h64v220h-56V240l-48 76h-32l-48-76v126z"/>
+</svg>

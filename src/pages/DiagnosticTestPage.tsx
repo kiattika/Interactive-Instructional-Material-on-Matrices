@@ -21,7 +21,10 @@ import { TopicKey, TOPIC_LABELS } from '../lib/topics';
 import { PRE_TEST_QUESTIONS, POST_TEST_QUESTIONS, TOPIC_ADVICE } from '../lib/diagnosticQuestions';
 import { shuffleOptions } from '../lib/shuffleOptions';
 import { RenderTextWithMath } from '../components/math/MathComponents';
+import { BadgesList, ALL_BADGES } from '../components/BadgesAndCertificate';
+import { SatisfactionSurvey } from '../components/SatisfactionSurvey';
 import { getClassroomLink, getStudentId } from '../lib/classroomSync';
+import { withActivity } from '../lib/motivation';
 
 interface DiagnosticTestPageProps {
   mode: 'pre' | 'post';
@@ -37,6 +40,26 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
 
   const [progress, setProgress] = useState<StudentProgress>(loadStudentProgress);
   const [settings] = useState(loadTeacherSettings);
+  // Anonymous satisfaction survey, offered once per device after the Post-Test (see
+  // lib/surveyStore.ts). Needs the joined class code to file the response under; a verified
+  // teacher previewing without a class is simply never prompted.
+  const surveyClassCode = getClassroomLink()?.classCode ?? null;
+  const [surveySubmittedNow, setSurveySubmittedNow] = useState(false);
+  const showSurvey =
+    mode === 'post' &&
+    !!surveyClassCode &&
+    progress.postTestCompleted &&
+    (!progress.hasCompletedSurvey || surveySubmittedNow);
+
+  const handleSurveyResolved = (outcome: 'submitted' | 'dismissed') => {
+    // Local-only flag so this device isn't re-prompted. Saved WITHOUT a classroom sync: the flag
+    // isn't part of the synced payload anyway, and a roster lastSyncedAt stamped at the moment of
+    // submission could be lined up with the new anonymous response.
+    const updated = { ...loadStudentProgress(), hasCompletedSurvey: true };
+    saveStudentProgress(updated, { skipClassroomSync: true });
+    setProgress(updated);
+    if (outcome === 'submitted') setSurveySubmittedNow(true); // keep the thank-you visible
+  };
 
   // 18/20 questions across both banks had the correct answer hardcoded at option index 0 — see
   // shuffleOptions.ts. Seeded by studentId+questionId so it's stable for this student but
@@ -111,7 +134,7 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
 
       const finalPercent = Math.round((score / questions.length) * 100);
 
-      const updatedProgress: StudentProgress = { ...progress };
+      const updatedProgress: StudentProgress = withActivity(progress);
       // Award the one-time completion XP BEFORE flipping *TestCompleted to true, so retaking
       // the test later (preTestCompleted/postTestCompleted already true) can't farm more XP.
       // *TestCompleted itself is still recorded even while XP is disabled — enableXp only
@@ -184,11 +207,11 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
       {currentStep === 'intro' && (
         <div className="space-y-6">
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-2 max-w-sm">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">คะแนน {modeLabel}</span>
+            <span className="text-xs sm:text-[10px] font-bold text-slate-400 uppercase tracking-widest">คะแนน {modeLabel}</span>
             <p className="text-3xl font-black text-slate-800">{isCompleted ? `${ownScore}%` : 'ยังไม่ได้ทำ'}</p>
             <button
               onClick={handleStartTest}
-              className="w-full mt-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition-colors"
+              className="w-full mt-3 py-2 min-h-11 sm:min-h-0 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition-colors"
             >
               {isCompleted
                 ? `ทำแบบทดสอบ ${modeLabel} อีกครั้ง`
@@ -212,7 +235,7 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
               {/* Comparison Cards */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-2">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  <span className="text-xs sm:text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                     คะแนนก่อนเรียน (Pre-Test)
                   </span>
                   <p className="text-3xl font-black text-slate-800">
@@ -221,7 +244,7 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
                 </div>
 
                 <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-2">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  <span className="text-xs sm:text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                     คะแนนหลังเรียน (Post-Test)
                   </span>
                   <p className="text-3xl font-black text-indigo-600">
@@ -230,7 +253,7 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
                 </div>
 
                 <div className="bg-gradient-to-br from-emerald-500 to-emerald-700 text-white rounded-2xl p-5 shadow-sm space-y-2">
-                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-100">
+                  <span className="text-xs sm:text-[10px] font-extrabold uppercase tracking-widest text-emerald-100">
                     พัฒนาการรวม (Improvement)
                   </span>
                   <div className="flex items-center gap-2">
@@ -271,6 +294,25 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
                 </div>
               </div>
 
+              {/* Earned badges — the same BadgesList LearningPath uses, shown next to the score and
+                  mastery breakdown once the Post-Test is done. Hidden when the teacher turned
+                  badges off, matching LearningPath. */}
+              {progress.postTestCompleted && settings.enableBadges && (
+                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-base font-extrabold text-slate-800">ตราที่ได้รับ (Badges)</h3>
+                    <span className="text-xs font-bold text-indigo-600">
+                      {progress.earnedBadges.length} / {ALL_BADGES.length} Badges
+                    </span>
+                  </div>
+                  <BadgesList progress={progress} />
+                </div>
+              )}
+
+              {showSurvey && surveyClassCode && (
+                <SatisfactionSurvey classCode={surveyClassCode} onResolved={handleSurveyResolved} />
+              )}
+
               {/* Error Analysis & Recommendations */}
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 shadow-sm space-y-3">
                 <div className="flex items-center gap-2 text-amber-900 font-extrabold text-sm">
@@ -295,7 +337,7 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
                           <button
                             onClick={() => handleGeneratePractice(key)}
                             disabled={aiLoading && aiTopic === key}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-amber-300 text-amber-800 rounded-lg text-[11px] font-bold hover:bg-amber-100 transition-colors disabled:opacity-60"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-11 sm:min-h-0 bg-white border border-amber-300 text-amber-800 rounded-lg text-xs sm:text-[11px] font-bold hover:bg-amber-100 transition-colors disabled:opacity-60"
                           >
                             {aiLoading && aiTopic === key ? (
                               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -369,7 +411,7 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
             <button
               disabled={userAnswers[activeQuestion.id] === undefined}
               onClick={handleNextQuestion}
-              className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow-md transition-colors flex items-center gap-2"
+              className="px-6 py-3 min-h-11 sm:min-h-0 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow-md transition-colors flex items-center gap-2"
             >
               {qIndex < questions.length - 1 ? 'ข้อถัดไป' : 'ส่งแบบทดสอบ'} <ArrowRight className="w-4 h-4" />
             </button>
@@ -387,11 +429,20 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
           <p className="text-sm text-slate-600">
             คะแนนที่คุณได้: <span className="font-extrabold text-indigo-600 text-lg">{ownScore}%</span>
           </p>
+          {mode === 'post' && settings.enableBadges && (
+            <p className="text-xs text-slate-500">
+              ได้รับตราแล้ว {progress.earnedBadges.length} / {ALL_BADGES.length} — ดูตราทั้งหมดในรายงานสรุปผล
+            </p>
+          )}
+
+          {showSurvey && surveyClassCode && (
+            <SatisfactionSurvey classCode={surveyClassCode} onResolved={handleSurveyResolved} />
+          )}
 
           <div className="pt-4 flex justify-center gap-3">
             <button
               onClick={() => setCurrentStep('intro')}
-              className="px-6 py-2.5 bg-slate-900 text-white font-bold text-xs rounded-xl shadow transition-colors flex items-center gap-2"
+              className="px-6 py-2.5 min-h-11 sm:min-h-0 bg-slate-900 text-white font-bold text-xs rounded-xl shadow transition-colors flex items-center gap-2"
             >
               <RotateCcw className="w-4 h-4" /> {mode === 'post' ? 'ดูรายงานสรุปผลเปรียบเทียบ' : 'กลับหน้าหลัก'}
             </button>

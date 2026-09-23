@@ -93,6 +93,9 @@ export interface ExerciseQuestion {
   system: LinearSystem;
   options?: string[];
   correctAnswer: string | number | number[] | number[][];
+  // Why each wrong option is wrong, keyed by the option's value (options are value-matched via
+  // correctAnswer). Shown after a first wrong submit instead of revealing the answer.
+  optionFeedback?: Record<string, string>;
   explanation: string;
   hints: string[];
 }

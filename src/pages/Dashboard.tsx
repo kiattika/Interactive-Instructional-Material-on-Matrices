@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Award, Target, Zap, BookOpen, Compass, ArrowRight, Sparkles, CheckCircle2, GraduationCap } from 'lucide-react';
+import { Award, Target, Zap, BookOpen, Compass, ArrowRight, Sparkles, CheckCircle2, GraduationCap, Flame } from 'lucide-react';
 import { loadStudentProgress, loadTeacherSettings, CURRICULUM_LESSONS } from '../lib/learningStore';
+import { computeLearningStreak, getNextBadgeNudge } from '../lib/motivation';
+import { ALL_BADGES } from '../components/BadgesAndCertificate';
 
 export default function Dashboard() {
   const [progress] = useState(loadStudentProgress);
@@ -12,6 +14,13 @@ export default function Dashboard() {
   const nextLesson =
     CURRICULUM_LESSONS.find((l) => !progress.completedLessons.includes(l.id)) ||
     CURRICULUM_LESSONS[0];
+
+  const streak = computeLearningStreak(progress.activityDates);
+  // Badge nudge follows the teacher's badges toggle, like every other badge surface.
+  const nudge = settings.enableBadges ? getNextBadgeNudge(ALL_BADGES.map((b) => b.id), progress) : null;
+  const nudgeBadge = nudge ? ALL_BADGES.find((b) => b.id === nudge.badgeId) : undefined;
+  const allBadgesEarned = ALL_BADGES.every((b) => progress.earnedBadges.includes(b.id));
+  const showBadgeCard = settings.enableBadges && (!!nudgeBadge || allBadgesEarned);
 
   return (
     <div className="h-full flex flex-col space-y-6 pb-8">
@@ -26,7 +35,7 @@ export default function Dashboard() {
         </div>
         <Link
           to="/learning"
-          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 self-start sm:self-auto"
+          className="px-5 py-2.5 min-h-11 sm:min-h-0 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center gap-2 self-start sm:self-auto"
         >
           <Compass className="w-4 h-4" /> ไปยังเส้นทางการเรียนรู้ ({CURRICULUM_LESSONS.length} บท)
         </Link>
@@ -39,9 +48,9 @@ export default function Dashboard() {
             <Target className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">ความก้าวหน้ารวม</p>
+            <p className="text-xs sm:text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">ความก้าวหน้ารวม</p>
             <p className="text-2xl font-black text-slate-800">{progressPercent}%</p>
-            <p className="text-[10px] text-slate-400 font-medium">เรียนจบแล้ว {completedCount} / {CURRICULUM_LESSONS.length} บทเรียน</p>
+            <p className="text-xs sm:text-[10px] text-slate-400 font-medium">เรียนจบแล้ว {completedCount} / {CURRICULUM_LESSONS.length} บทเรียน</p>
           </div>
         </div>
 
@@ -55,7 +64,7 @@ export default function Dashboard() {
             <div>
               {settings.enableXp && (
                 <>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">คะแนนสะสม (XP)</p>
+                  <p className="text-xs sm:text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">คะแนนสะสม (XP)</p>
                   <p className="text-2xl font-black text-emerald-600">{progress.xp} XP</p>
                 </>
               )}
@@ -63,7 +72,7 @@ export default function Dashboard() {
                 <p
                   className={
                     settings.enableXp
-                      ? 'text-[10px] text-slate-400 font-medium'
+                      ? 'text-xs sm:text-[10px] text-slate-400 font-medium'
                       : 'text-2xl font-black text-emerald-600'
                   }
                 >
@@ -80,7 +89,7 @@ export default function Dashboard() {
             <Zap className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">คะแนน Pre/Post-Test</p>
+            <p className="text-xs sm:text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">คะแนน Pre/Post-Test</p>
             <p className="text-2xl font-black text-slate-800">
               {progress.postTestCompleted
                 ? `${progress.postTestScore}%`
@@ -88,11 +97,65 @@ export default function Dashboard() {
                 ? `${progress.preTestScore}% (Pre)`
                 : 'ยังไม่ได้ทำ'}
             </p>
-            <Link to="/post-test" className="text-[10px] font-bold text-indigo-600 hover:underline">
+            <Link to="/post-test" className="inline-flex items-center min-h-11 sm:min-h-0 text-xs sm:text-[10px] font-bold text-indigo-600 hover:underline">
               ดูผลเปรียบเทียบ ➔
             </Link>
           </div>
         </div>
+
+        {/* Learning streak — consecutive local days with any learning activity (see
+            StudentProgress.activityDates). */}
+        <div
+          className={`${showBadgeCard ? 'md:col-span-6' : 'md:col-span-12'} bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4`}
+        >
+          <div
+            className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 border ${
+              streak.current > 0 ? 'bg-orange-50 border-orange-100 text-orange-500' : 'bg-slate-50 border-slate-200 text-slate-400'
+            }`}
+          >
+            <Flame className="w-6 h-6" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs sm:text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">เรียนต่อเนื่อง (Streak)</p>
+            <p className="text-2xl font-black text-slate-800">{streak.current} วัน</p>
+            <p className="text-xs text-slate-500">
+              {streak.current === 0
+                ? 'เริ่มนับวันเรียนต่อเนื่องได้เลยวันนี้ — เรียนบทเรียนหรือทำแบบฝึกหัดสักข้อ'
+                : streak.activeToday
+                ? 'วันนี้เรียนแล้ว เยี่ยมมาก! กลับมาเรียนต่อพรุ่งนี้เพื่อต่อสถิติ'
+                : 'วันนี้ยังไม่ได้เรียน — ทำแบบฝึกหัดสักข้อเพื่อรักษาสถิติไว้'}
+            </p>
+          </div>
+        </div>
+
+        {/* Next-badge nudge — the not-yet-earned badge with the most progress toward its rule
+            (see getNextBadgeNudge in lib/motivation.ts). */}
+        {showBadgeCard && (
+          <div className="md:col-span-6 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
+            <div className="w-12 h-12 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0">
+              {nudgeBadge ? nudgeBadge.icon : '🏅'}
+            </div>
+            <div className="min-w-0 flex-grow">
+              <p className="text-xs sm:text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">ตราถัดไป (Next Badge)</p>
+              {nudge && nudgeBadge ? (
+                <>
+                  <p className="text-sm font-black text-slate-800">
+                    อีก <span className="text-indigo-600">{nudge.remainingPercent}%</span> จะได้ตรา {nudgeBadge.thaiName}
+                  </p>
+                  <div className="mt-1.5 w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-indigo-500 rounded-full transition-all duration-500"
+                      style={{ width: `${100 - nudge.remainingPercent}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">{nudgeBadge.description}</p>
+                </>
+              ) : (
+                <p className="text-sm font-black text-emerald-600">ได้รับตราครบทุกตราแล้ว ยอดเยี่ยมมาก! 🎉</p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Curriculum Progress List — takes the full remaining width when the AI tutor teaser
             (below) is hidden, since there's nothing left to share the row with. */}
@@ -117,7 +180,7 @@ export default function Dashboard() {
                   >
                     <div className="flex items-center gap-2.5">
                       <div
-                        className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[10px] ${
+                        className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs sm:text-[10px] ${
                           isCompleted ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-500'
                         }`}
                       >
@@ -127,7 +190,7 @@ export default function Dashboard() {
                     </div>
                     <Link
                       to={`/learning/lesson/${mod.id}`}
-                      className="text-[10px] font-bold text-indigo-600 hover:underline"
+                      className="inline-flex items-center min-h-11 sm:min-h-0 text-xs sm:text-[10px] font-bold text-indigo-600 hover:underline"
                     >
                       {isCompleted ? 'ทบทวน' : 'เรียนรู้'}
                     </Link>
@@ -139,7 +202,7 @@ export default function Dashboard() {
 
           <div className="mt-4 pt-3 border-t border-slate-100 flex justify-between items-center text-xs">
             <span className="text-slate-400 font-medium">ดูบทเรียนทั้งหมด {CURRICULUM_LESSONS.length} บทเรียน</span>
-            <Link to="/learning" className="font-bold text-indigo-600 flex items-center gap-1 hover:underline">
+            <Link to="/learning" className="min-h-11 sm:min-h-0 font-bold text-indigo-600 flex items-center gap-1 hover:underline">
               เปิดแผนผังบทเรียน <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>
@@ -157,7 +220,7 @@ export default function Dashboard() {
                 </div>
                 <div>
                   <h3 className="text-white font-bold text-sm">Gemini Math Assistant</h3>
-                  <p className="text-[10px] text-indigo-200">ครูผู้ช่วยวิชาคณิตศาสตร์ (Socratic Guidance)</p>
+                  <p className="text-xs sm:text-[10px] text-indigo-200">ครูผู้ช่วยวิชาคณิตศาสตร์ (Socratic Guidance)</p>
                 </div>
               </div>
 
@@ -168,7 +231,7 @@ export default function Dashboard() {
               <div className="pt-2">
                 <Link
                   to={`/learning/lesson/${nextLesson.id}`}
-                  className="w-full py-2.5 bg-white text-indigo-950 font-black text-xs rounded-xl hover:bg-slate-100 transition-colors flex items-center justify-center gap-2 shadow-sm"
+                  className="w-full py-2.5 min-h-11 sm:min-h-0 bg-white text-indigo-950 font-black text-xs rounded-xl hover:bg-slate-100 transition-colors flex items-center justify-center gap-2 shadow-sm"
                 >
                   เริ่มเรียน {nextLesson.title} <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
@@ -187,7 +250,7 @@ export default function Dashboard() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
+              <span className="text-xs sm:text-[10px] font-extrabold uppercase tracking-wider bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
                 ผู้จัดทำสื่อการสอน
               </span>
             </div>
@@ -199,7 +262,7 @@ export default function Dashboard() {
             </p>
           </div>
         </div>
-        <div className="text-[11px] text-slate-400 font-medium self-end sm:self-center">
+        <div className="text-xs sm:text-[11px] text-slate-400 font-medium self-end sm:self-center">
           สื่อการเรียนรู้วิชาคณิตศาสตร์ เรื่อง ระบบสมการเชิงเส้นและเมทริกซ์
         </div>
       </div>

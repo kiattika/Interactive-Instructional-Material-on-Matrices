@@ -766,6 +766,11 @@ export function generateExercises(): ExerciseQuestion[] {
       },
       options: ['$-3$', '$3$', '$-1$', '$1$'],
       correctAnswer: '$-3$',
+      optionFeedback: {
+        '$3$': 'สลับลำดับการลบ: $bc - ad = 1 - (-2) = 3$ — สูตรคือ $ad - bc$',
+        '$-1$': 'บวก $bc$ แทนการลบ: $-2 + 1 = -1$ — สูตรคือ $ad - bc$',
+        '$1$': 'นี่คือผลบวกเส้นทแยงมุมหลัก $2 + (-1) = 1$ ไม่ใช่ det — ต้องคูณเฉียงแล้วลบกัน $ad - bc$'
+      },
       explanation: '$\\det(A) = (2 \\times -1) - (1 \\times 1) = -2 - 1 = -3$',
       hints: [
         'สูตร det ของเมทริกซ์ 2x2 คือ $ad - bc$',
@@ -795,6 +800,11 @@ export function generateExercises(): ExerciseQuestion[] {
         '$A = \\begin{bmatrix} 5 & 1 \\\\ 2 & 1 \\end{bmatrix}$',
       ],
       correctAnswer: '$A = \\begin{bmatrix} 2 & 1 \\\\ 1 & -1 \\end{bmatrix}$',
+      optionFeedback: {
+        '$A = \\begin{bmatrix} 2 & 5 \\\\ 1 & 1 \\end{bmatrix}$': 'นำค่าคงที่ฝั่งขวา ($5, 1$) มาปนในเมทริกซ์ $A$ — ค่าคงที่ต้องอยู่ใน $B$',
+        '$A = \\begin{bmatrix} 1 & 2 \\\\ -1 & 1 \\end{bmatrix}$': 'สลับตำแหน่งสมาชิก — แถวแรกต้องเป็นสัมประสิทธิ์ของ $x$ แล้วตามด้วย $y$ จากสมการแรก คือ $[2, 1]$',
+        '$A = \\begin{bmatrix} 5 & 1 \\\\ 2 & 1 \\end{bmatrix}$': 'นำค่าคงที่ $5$ มาใส่แทนสัมประสิทธิ์ — $A$ มีเฉพาะตัวเลขหน้าตัวแปร'
+      },
       explanation: 'แถวแรกคือสัมประสิทธิ์ของ $x$ และ $y$ ในสมการแรก $(2, 1)$ แถวสองคือ $(1, -1)$',
       hints: [
         'นำตัวเลขหน้าตัวแปร $x$ และ $y$ ในแต่ละสมการมาจัดเรียงตามแถว',
@@ -819,6 +829,11 @@ export function generateExercises(): ExerciseQuestion[] {
       },
       options: ['$-6$', '$-3$', '$6$', '$3$'],
       correctAnswer: '$-6$',
+      optionFeedback: {
+        '$-3$': 'นั่นคือ $\\det(A)$ — ต้องนำ $B$ ไปแทนคอลัมน์แรกของ $A$ ก่อนจึงจะเป็น $D_x$',
+        '$6$': 'ผิดเครื่องหมาย: $(5)(-1) - (1)(1) = -5 - 1 = -6$',
+        '$3$': 'ตรวจว่าใช้ $D_x = \\begin{bmatrix} 5 & 1 \\\\ 1 & -1 \\end{bmatrix}$ และเครื่องหมายถูกหรือยัง — $B$ ต้องแทนคอลัมน์แรก (คอลัมน์ของ $x$)'
+      },
       explanation: '$D_x$ เกิดจากการแทนที่คอลัมน์แรกของ $A$ ด้วย $B$ คือ $D_x = \\begin{bmatrix} 5 & 1 \\\\ 1 & -1 \\end{bmatrix}$ ดังนั้น $\\det(D_x) = (5 \\times -1) - (1 \\times 1) = -6$',
       hints: [
         '$D_x$ คือเมทริกซ์ที่นำ $B = \\begin{bmatrix} 5 \\\\ 1 \\end{bmatrix}$ มาแทนในคอลัมน์แรกของ $A$',
@@ -848,6 +863,11 @@ export function generateExercises(): ExerciseQuestion[] {
         '$x = 4, y = 0$',
       ],
       correctAnswer: '$x = \\frac{14}{5}, y = \\frac{9}{5}$',
+      optionFeedback: {
+        '$x = 2, y = 3$': 'แทนกลับ: $3(2) + 2(3) = 12$ เป็นจริง แต่ $2 - 3 = -1 \\neq 1$ — คำตอบต้องเป็นจริงทั้งสองสมการ',
+        '$x = \\frac{12}{5}, y = \\frac{7}{5}$': 'เป็นจริงแค่สมการที่ 2 แต่สมการแรกได้ $3(\\frac{12}{5}) + 2(\\frac{7}{5}) = 10 \\neq 12$',
+        '$x = 4, y = 0$': '$3(4) + 2(0) = 12$ เป็นจริง แต่ $4 - 0 = 4 \\neq 1$'
+      },
       explanation: '$\\det(A) = -5, \\det(D_x) = -14 \\implies x = \\frac{-14}{-5} = \\frac{14}{5}$; $\\det(D_y) = -9 \\implies y = \\frac{-9}{-5} = \\frac{9}{5}$',
       hints: [
         'คำนวณ $\\det(A) = (3 \\times -1) - (2 \\times 1) = -5$',
@@ -877,6 +897,11 @@ export function generateExercises(): ExerciseQuestion[] {
         'ไม่สามารถสรุปได้',
       ],
       correctAnswer: 'ไม่มีคำตอบ (No Solution)',
+      optionFeedback: {
+        'มีคำตอบเดียว (Unique Solution)': '$\\det(A) = 1(2) - 1(2) = 0$ จึงไม่มีทางมีคำตอบเดียว',
+        'มีคำตอบไม่จำกัดจำนวน (Infinitely Many Solutions)': 'ถ้ามีคำตอบนับไม่ถ้วน ฝั่งขวาต้องเป็นสัดส่วนเดียวกันด้วย ($2 \\times 2 = 4$) แต่ที่นี่เป็น $5$',
+        'ไม่สามารถสรุปได้': 'สรุปได้ — เมื่อ $\\det(A) = 0$ ให้ตรวจความสอดคล้องต่อ ซึ่งพบข้อขัดแย้ง $4 = 5$'
+      },
       explanation: '$\\det(A) = 0$ และเมื่อนำมาคำนวณ $2(x+y) = 4$ แต่สมการที่สองให้ $2x+2y = 5$ ซึ่งเกิดข้อขัดแย้ง $4 = 5$ ทำให้ระบบสมการไม่มีคำตอบ',
       hints: [
         'คำนวณ $\\det(A) = 1(2) - 1(2) = 0$',

@@ -18,11 +18,14 @@ import {
   saveStudentProgress,
   loadTeacherSettings,
   StudentProgress,
-  CHECK_QUESTION_CORRECT_XP
+  CHECK_QUESTION_CORRECT_XP,
+  CHECK_QUESTION_SECOND_TRY_XP
 } from '../lib/learningStore';
+import { resolveCheckAttempt } from '../lib/checkAttempts';
 import { formatFractionOrDec } from '../lib/matrixEngine';
 import { shuffleOptions } from '../lib/shuffleOptions';
 import { getStudentId } from '../lib/classroomSync';
+import { withActivity, badgesForLessonCompletion } from '../lib/motivation';
 import {
   SystemDisplay,
   MatrixEquationDisplay,
@@ -38,13 +41,21 @@ export default function LessonView() {
   const [progress, setProgress] = useState<StudentProgress>(loadStudentProgress);
   const [settings] = useState(loadTeacherSettings);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<number, number>>({});
+  // submitted[q] = the question is settled (answered correctly, or answer revealed after two
+  // wrong picks) — which is what the completion gate below counts.
   const [submitted, setSubmitted] = useState<Record<number, boolean>>({});
+  // Wrong (shuffled) option indices picked so far on each question in this sitting — see
+  // lib/checkAttempts.ts for the two-strike rules.
+  const [wrongPicks, setWrongPicks] = useState<Record<number, number[]>>({});
+  const [attemptXp, setAttemptXp] = useState<Record<number, number>>({});
   const [completedThisSession, setCompletedThisSession] = useState(false);
 
   // Reset selected options and submission states automatically when switching lesson
   useEffect(() => {
     setSelectedAnswers({});
     setSubmitted({});
+    setWrongPicks({});
+    setAttemptXp({});
     setCompletedThisSession(false);
   }, [lessonId]);
 
@@ -57,12 +68,20 @@ export default function LessonView() {
     if (!lesson) return [];
     const studentId = getStudentId();
     return lesson.checkQuestions.map((q, qIdx) => {
-      const { options, correctIndex } = shuffleOptions(
+      // Shuffle option+feedback pairs together so each "why wrong" stays with its option. The
+      // permutation depends only on the seed and option count, so students keep the same order
+      // they saw before whyWrong existed.
+      const { options: pairs, correctIndex } = shuffleOptions(
         `${studentId}-lesson${lesson.id}-check${qIdx}`,
-        q.options,
+        q.options.map((text, i) => ({ text, whyWrong: q.whyWrong[i] })),
         q.correctIndex
       );
-      return { ...q, options, correctIndex };
+      return {
+        ...q,
+        options: pairs.map((p) => p.text),
+        whyWrong: pairs.map((p) => p.whyWrong),
+        correctIndex
+      };
     });
   }, [lesson]);
 
@@ -87,37 +106,58 @@ export default function LessonView() {
   };
 
   const handleCheckAnswer = (qIndex: number) => {
-    setSubmitted((prev) => ({ ...prev, [qIndex]: true }));
+    const picked = selectedAnswers[qIndex];
+    if (picked === undefined) return;
+    const isCorrect = picked === checkQuestions[qIndex]?.correctIndex;
+    const priorWrong = (wrongPicks[qIndex] || []).length;
+    const xpKey = `lesson${lesson.id}-check${qIndex}`;
+    const result = resolveCheckAttempt(progress, xpKey, isCorrect, priorWrong, settings.enableXp);
 
-    const isCorrect = selectedAnswers[qIndex] === checkQuestions[qIndex]?.correctIndex;
-    const xpKey = `lesson${lesson?.id}-check${qIndex}`;
-    if (isCorrect && lesson && settings.enableXp && !progress.checkQuestionXpAwarded.includes(xpKey)) {
-      const updatedProgress: StudentProgress = {
-        ...progress,
-        xp: progress.xp + CHECK_QUESTION_CORRECT_XP,
-        checkQuestionXpAwarded: [...progress.checkQuestionXpAwarded, xpKey]
-      };
+    // Any answer is learning activity for the streak; withActivity returns the same object when
+    // nothing changed, so this only saves when there's something to save.
+    const updatedProgress = withActivity(result.progress);
+    if (updatedProgress !== progress) {
       saveStudentProgress(updatedProgress);
       setProgress(updatedProgress);
     }
+
+    if (!isCorrect) setWrongPicks((prev) => ({ ...prev, [qIndex]: [...(prev[qIndex] || []), picked] }));
+    if (result.outcome === 'retry') {
+      // First strike: don't reveal — clear the pick so the student chooses again.
+      setSelectedAnswers((prev) => {
+        const copy = { ...prev };
+        delete copy[qIndex];
+        return copy;
+      });
+    } else {
+      setSubmitted((prev) => ({ ...prev, [qIndex]: true }));
+      setAttemptXp((prev) => ({ ...prev, [qIndex]: result.xpAwarded }));
+    }
   };
 
+  const clearKey = <T,>(record: Record<number, T>, key: number): Record<number, T> => {
+    const copy = { ...record };
+    delete copy[key];
+    return copy;
+  };
+
+  // Before a question is settled this only clears the current pick — its strike stays, so a reset
+  // can't erase a first wrong pick. A settled question restarts fully as practice (its XP is
+  // already settled either way).
   const handleResetQuestion = (qIndex: number) => {
-    setSelectedAnswers((prev) => {
-      const copy = { ...prev };
-      delete copy[qIndex];
-      return copy;
-    });
-    setSubmitted((prev) => {
-      const copy = { ...prev };
-      delete copy[qIndex];
-      return copy;
-    });
+    setSelectedAnswers((prev) => clearKey(prev, qIndex));
+    if (submitted[qIndex]) {
+      setSubmitted((prev) => clearKey(prev, qIndex));
+      setWrongPicks((prev) => clearKey(prev, qIndex));
+      setAttemptXp((prev) => clearKey(prev, qIndex));
+    }
   };
 
   const handleResetAllQuestions = () => {
     setSelectedAnswers({});
+    setWrongPicks((prev) => Object.fromEntries(Object.entries(prev).filter(([q]) => !submitted[Number(q)])));
     setSubmitted({});
+    setAttemptXp({});
   };
 
   const allCheckQuestionsAttempted =
@@ -127,34 +167,21 @@ export default function LessonView() {
     if (completedThisSession || !allCheckQuestionsAttempted) return;
 
     const newCompleted = Array.from(new Set([...progress.completedLessons, lesson.id]));
-    const updatedProgress: StudentProgress = {
+    const updatedProgress: StudentProgress = withActivity({
       ...progress,
       completedLessons: newCompleted,
       xp: settings.enableXp ? progress.xp + 50 : progress.xp,
       lessonScores: { ...progress.lessonScores, [lesson.id]: 100 }
-    };
+    });
 
-    // Award badges if applicable — earnedBadges is never touched at all while badges are
-    // disabled, so nothing is retroactively earned the moment a teacher re-enables them.
+    // Award badges if applicable (rules in lib/motivation.ts) — earnedBadges is never touched at
+    // all while badges are disabled, so nothing is retroactively earned the moment a teacher
+    // re-enables them.
     if (settings.enableBadges) {
-      if (lesson.id === 2 && !updatedProgress.earnedBadges.includes('matrix_explorer')) {
-        updatedProgress.earnedBadges.push('matrix_explorer');
-      }
-      if (lesson.id === 3 && !updatedProgress.earnedBadges.includes('determinant_master')) {
-        updatedProgress.earnedBadges.push('determinant_master');
-      }
-      if (lesson.id === 5 && !updatedProgress.earnedBadges.includes('inverse_solver')) {
-        updatedProgress.earnedBadges.push('inverse_solver');
-      }
-      if (lesson.id === 6 && !updatedProgress.earnedBadges.includes('cramer_specialist')) {
-        updatedProgress.earnedBadges.push('cramer_specialist');
-      }
-      if (lesson.id === 8 && !updatedProgress.earnedBadges.includes('gaussian_expert')) {
-        updatedProgress.earnedBadges.push('gaussian_expert');
-      }
-      if (newCompleted.length >= CURRICULUM_LESSONS.length && !updatedProgress.earnedBadges.includes('matrix_master')) {
-        updatedProgress.earnedBadges.push('matrix_master');
-      }
+      updatedProgress.earnedBadges = [
+        ...updatedProgress.earnedBadges,
+        ...badgesForLessonCompletion(lesson.id, newCompleted, updatedProgress.earnedBadges)
+      ];
     }
 
     saveStudentProgress(updatedProgress);
@@ -170,7 +197,7 @@ export default function LessonView() {
       <div className="flex items-center justify-between">
         <button
           onClick={() => navigate('/learning')}
-          className="flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-indigo-600 transition-colors"
+          className="min-h-11 sm:min-h-0 flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-indigo-600 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" /> กลับสู่เส้นทางการเรียนรู้
         </button>
@@ -193,7 +220,7 @@ export default function LessonView() {
             <div className="mt-3 flex gap-2">
               <Link
                 to={`/learning/lesson/${uncompletedPrereqs[0]}`}
-                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-colors"
+                className="px-3 py-1.5 min-h-11 sm:min-h-0 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-colors"
               >
                 ทบทวนบทเรียน {uncompletedPrereqs[0]}
               </Link>
@@ -277,7 +304,7 @@ export default function LessonView() {
           {Object.keys(selectedAnswers).length > 0 && (
             <button
               onClick={handleResetAllQuestions}
-              className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1 min-h-11 sm:min-h-0 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"
             >
               <RotateCcw className="w-3.5 h-3.5" /> รีเซ็ตการเลือกคำตอบทั้งหมด
             </button>
@@ -288,6 +315,8 @@ export default function LessonView() {
           const selectedOption = selectedAnswers[qIdx];
           const isSubmitted = submitted[qIdx];
           const isCorrect = selectedOption === q.correctIndex;
+          const strikes = wrongPicks[qIdx] || [];
+          const lastWrong = strikes[strikes.length - 1];
 
           return (
             <div key={qIdx} className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
@@ -295,10 +324,10 @@ export default function LessonView() {
                 <div className="text-sm font-bold text-slate-800">
                   {qIdx + 1}. <RenderTextWithMath text={q.question} />
                 </div>
-                {selectedOption !== undefined && (
+                {(selectedOption !== undefined || isSubmitted) && (
                   <button
                     onClick={() => handleResetQuestion(qIdx)}
-                    className="text-xs text-slate-400 hover:text-slate-600 font-semibold flex items-center gap-1 flex-shrink-0"
+                    className="min-h-11 sm:min-h-0 text-xs text-slate-400 hover:text-slate-600 font-semibold flex items-center gap-1 flex-shrink-0"
                     title="เลือกลองทำใหม่อีกครั้ง"
                   >
                     <RotateCcw className="w-3 h-3" /> เลือกใหม่
@@ -308,14 +337,19 @@ export default function LessonView() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {q.options.map((opt, optIdx) => {
                   const isSelected = selectedOption === optIdx;
+                  const isStruck = strikes.includes(optIdx);
                   let btnClass = 'bg-white border-slate-200 text-slate-700 hover:border-indigo-300';
                   if (isSelected) {
                     btnClass = 'bg-indigo-50 border-indigo-500 text-indigo-900 font-bold';
                   }
+                  // Already-tried wrong options stay marked (and unpickable) while retrying.
+                  if (isStruck) {
+                    btnClass = 'bg-rose-50 border-rose-300 text-rose-800 line-through decoration-rose-300';
+                  }
                   if (isSubmitted) {
                     if (optIdx === q.correctIndex) {
                       btnClass = 'bg-emerald-50 border-emerald-500 text-emerald-900 font-bold';
-                    } else if (isSelected && !isCorrect) {
+                    } else if (isStruck || (isSelected && !isCorrect)) {
                       btnClass = 'bg-rose-50 border-rose-500 text-rose-900 font-bold';
                     }
                   }
@@ -323,8 +357,9 @@ export default function LessonView() {
                   return (
                     <button
                       key={optIdx}
-                      onClick={() => !isSubmitted && handleSelectOption(qIdx, optIdx)}
-                      className={`p-3 text-left rounded-xl border text-xs transition-all ${btnClass}`}
+                      disabled={isStruck && !isSubmitted}
+                      onClick={() => !isSubmitted && !isStruck && handleSelectOption(qIdx, optIdx)}
+                      className={`p-3 min-h-12 sm:min-h-0 text-left rounded-xl border text-sm sm:text-xs transition-all ${btnClass}`}
                     >
                       <RenderTextWithMath text={opt} />
                     </button>
@@ -332,17 +367,33 @@ export default function LessonView() {
                 })}
               </div>
 
+              {/* First strike: explain why the picked option is wrong without revealing the answer. */}
+              {!isSubmitted && lastWrong !== undefined && (
+                <div className="p-3 rounded-xl text-xs bg-amber-50 border border-amber-200 text-amber-900 space-y-1">
+                  <p className="font-bold">✕ ยังไม่ถูก — ลองคิดอีกครั้งนะ</p>
+                  {q.whyWrong[lastWrong] && (
+                    <p>
+                      <RenderTextWithMath text={q.whyWrong[lastWrong] as string} />
+                    </p>
+                  )}
+                  <p className="text-amber-700">
+                    เลือกคำตอบใหม่ได้อีก 1 ครั้ง
+                    {settings.enableXp ? ` (ตอบถูกครั้งนี้ได้ +${CHECK_QUESTION_SECOND_TRY_XP} XP)` : ''}
+                  </p>
+                </div>
+              )}
+
               {selectedOption !== undefined && !isSubmitted && (
                 <div className="flex items-center gap-2 pt-1">
                   <button
                     onClick={() => handleCheckAnswer(qIdx)}
-                    className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors"
+                    className="px-4 py-1.5 min-h-11 sm:min-h-0 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors"
                   >
                     ตรวจคำตอบ
                   </button>
                   <button
                     onClick={() => handleResetQuestion(qIdx)}
-                    className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold transition-colors"
+                    className="px-3 py-1.5 min-h-11 sm:min-h-0 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold transition-colors"
                   >
                     รีเซ็ตคำตอบ
                   </button>
@@ -358,10 +409,14 @@ export default function LessonView() {
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <p className="font-bold">{isCorrect ? '✓ ถูกต้อง!' : '✕ ยังไม่ถูกต้อง'}</p>
+                    <p className="font-bold">
+                      {isCorrect
+                        ? `✓ ถูกต้อง!${strikes.length > 0 ? ' (ตอบถูกในครั้งที่ 2)' : ''}${attemptXp[qIdx] ? ` +${attemptXp[qIdx]} XP` : ''}`
+                        : '✕ ยังไม่ถูกต้องทั้ง 2 ครั้ง — ดูคำตอบที่ถูกต้อง (สีเขียว) และคำอธิบายด้านล่าง'}
+                    </p>
                     <button
                       onClick={() => handleResetQuestion(qIdx)}
-                      className="text-xs font-bold underline hover:no-underline ml-2"
+                      className="inline-flex items-center min-h-11 sm:min-h-0 text-xs font-bold underline hover:no-underline ml-2"
                     >
                       ลองตอบใหม่อีกครั้ง
                     </button>

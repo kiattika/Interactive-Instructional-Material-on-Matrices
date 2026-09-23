@@ -17,7 +17,8 @@ import {
   parseNumericString,
 } from '../lib/matrixEngine';
 import { ENGINEERING_ICT_PROBLEMS } from '../lib/engineeringProblems';
-import { loadStudentProgress, saveStudentProgress, loadTeacherSettings, LAB_WALKTHROUGH_XP } from '../lib/learningStore';
+import { loadStudentProgress, saveStudentProgress, loadTeacherSettings, LAB_WALKTHROUGH_XP, SolvingMethod } from '../lib/learningStore';
+import { withActivity, withMethodUsed, VERSATILE_SOLVER_BADGE } from '../lib/motivation';
 import { GeminiTutor } from '../components/GeminiTutor';
 import { GaussStepDisplay } from '../components/GaussStepDisplay';
 import {
@@ -172,6 +173,22 @@ export default function MatrixLab() {
   // the completion banner from claiming "+15 XP!" again on every later visit to an
   // already-completed walkthrough.
   const [justEarnedLabXp, setJustEarnedLabXp] = useState(false);
+  const [justEarnedVersatileBadge, setJustEarnedVersatileBadge] = useState(false);
+
+  // Versatile Solver tracking: a method counts as "used" when the student opens its tab — or,
+  // for Inverse (the tab already open on arrival), when they expand one of its steps, so merely
+  // visiting the lab doesn't count. Re-reads storage before writing so this frequent small save
+  // can't overwrite XP another component (e.g. LivePollAwardWatcher) added since mount.
+  const recordMethodUse = (method: SolvingMethod) => {
+    const fresh = loadStudentProgress();
+    const updated = withActivity(withMethodUsed(fresh, method, settings.enableBadges));
+    if (updated === fresh) return;
+    saveStudentProgress(updated);
+    setProgress(updated);
+    if (!fresh.earnedBadges.includes(VERSATILE_SOLVER_BADGE) && updated.earnedBadges.includes(VERSATILE_SOLVER_BADGE)) {
+      setJustEarnedVersatileBadge(true);
+    }
+  };
 
   // Learning Mode & Hints
   const [learningMode, setLearningMode] = useState<boolean>(false);
@@ -361,11 +378,11 @@ export default function MatrixLab() {
   // later doesn't retroactively pay out for a walkthrough finished while it was off.
   useEffect(() => {
     if (isManualGaussComplete && !progress.matrixLabGaussCompleted) {
-      const updated = {
+      const updated = withActivity({
         ...progress,
         xp: settings.enableXp ? progress.xp + LAB_WALKTHROUGH_XP : progress.xp,
         matrixLabGaussCompleted: true
-      };
+      });
       saveStudentProgress(updated);
       setProgress(updated);
       if (settings.enableXp) setJustEarnedLabXp(true);
@@ -379,8 +396,11 @@ export default function MatrixLab() {
     `คำใบ้ที่ 3: ใช้สูตร X = A⁻¹B หรือ x = Dx / D ในการหาคำตอบสุดท้าย`,
   ];
 
+  // Fixed-height app shell (left column scrolls on its own beside the tutor) is lg-only: below lg
+  // the grid is a single column, and flex-grow + overflow-hidden there squeezed the left column
+  // (itself a scroller) to 0px tall, hiding the whole editor/solver on phones and tablets.
   return (
-    <div className="h-full flex flex-col gap-4">
+    <div className="flex flex-col gap-4 lg:h-full">
       {/* Top Header & Presets Bar */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -388,12 +408,12 @@ export default function MatrixLab() {
           <p className="text-xs text-slate-500">ทดลอง แก้สมการ และวิเคราะห์ขั้นตอนด้วยเมทริกซ์</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           {/* Dimension Selector */}
           <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
             <button
               onClick={() => handleDimensionChange('2x2')}
-              className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+              className={`px-3 py-1 min-h-11 sm:min-h-0 text-xs font-bold rounded-lg transition-all ${
                 dimension === '2x2' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -401,7 +421,7 @@ export default function MatrixLab() {
             </button>
             <button
               onClick={() => handleDimensionChange('3x3')}
-              className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+              className={`px-3 py-1 min-h-11 sm:min-h-0 text-xs font-bold rounded-lg transition-all ${
                 dimension === '3x3' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -412,7 +432,7 @@ export default function MatrixLab() {
           {/* Quick Presets */}
           <select
             onChange={(e) => e.target.value && handleLoadPreset(e.target.value)}
-            className="text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-slate-700 outline-none focus:border-indigo-500"
+            className="min-h-11 sm:min-h-0 min-w-0 flex-1 sm:flex-none text-base sm:text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-slate-700 outline-none focus:border-indigo-500"
             defaultValue=""
           >
             <option value="" disabled>
@@ -436,7 +456,7 @@ export default function MatrixLab() {
         <div className="bg-white rounded-2xl border border-indigo-200 p-5 shadow-sm space-y-3 flex-shrink-0">
           <div className="flex flex-wrap items-center gap-2">
             <span
-              className={`px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border ${
+              className={`px-2.5 py-0.5 rounded-md text-xs sm:text-[10px] font-bold uppercase tracking-wider border ${
                 activeAppliedProblem.field === 'engineering'
                   ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                   : 'bg-teal-50 text-teal-700 border-teal-200'
@@ -463,17 +483,17 @@ export default function MatrixLab() {
       )}
 
       {/* Main Bento Layout: Left = Matrix Editor & Solvers, Right = Gemini AI Tutor (if enabled) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-grow overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:flex-grow lg:overflow-hidden">
         {/* Left Column: Input Engine & Solver Tabs — takes the full width when the AI tutor is
             disabled, since there's no right column to share it with. */}
-        <div className={`${settings.enableAiTutor ? 'lg:col-span-8' : 'lg:col-span-12'} flex flex-col gap-4 overflow-y-auto pr-1`}>
+        <div className={`${settings.enableAiTutor ? 'lg:col-span-8' : 'lg:col-span-12'} flex flex-col gap-4 lg:overflow-y-auto lg:pr-1`}>
           {/* Matrix Input & Representation Bento Card */}
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
               <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                 <span>📐</span> Matrix Input Engine (AX = B)
               </h3>
-              <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100">
+              <span className="text-xs sm:text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100">
                 det(A) = {summary.determinant}
               </span>
             </div>
@@ -500,7 +520,7 @@ export default function MatrixLab() {
                           copy[rIdx][cIdx] = e.target.value;
                           setMatrixStrA(copy);
                         }}
-                        className="w-11 h-11 text-center font-bold text-slate-800 border-2 border-indigo-100 rounded-lg focus:border-indigo-500 outline-none text-sm bg-white"
+                        className="w-11 h-11 text-center font-bold text-slate-800 border-2 border-indigo-100 rounded-lg focus:border-indigo-500 outline-none text-base sm:text-sm bg-white"
                       />
                     ))
                   )}
@@ -542,7 +562,7 @@ export default function MatrixLab() {
                         copy[bIdx] = e.target.value;
                         setVectorStrB(copy);
                       }}
-                      className="w-11 h-11 text-center font-bold text-slate-800 border-2 border-indigo-100 rounded-lg focus:border-indigo-500 outline-none text-sm bg-white"
+                      className="w-11 h-11 text-center font-bold text-slate-800 border-2 border-indigo-100 rounded-lg focus:border-indigo-500 outline-none text-base sm:text-sm bg-white"
                     />
                   ))}
                 </div>
@@ -585,7 +605,7 @@ export default function MatrixLab() {
               see it right where they're already looking, instead of buried in the top toolbar. */}
           <button
             onClick={() => setLearningMode(!learningMode)}
-            className={`self-start px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border ${
+            className={`self-start px-3 py-1.5 min-h-11 sm:min-h-0 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border ${
               learningMode
                 ? 'bg-amber-50 text-amber-800 border-amber-300 shadow-sm'
                 : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
@@ -607,7 +627,7 @@ export default function MatrixLab() {
                   <div className="flex gap-1">
                     <button
                       onClick={() => setHintLevel((prev) => Math.min(prev + 1, hintsList.length))}
-                      className="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-800 text-[11px] font-bold rounded-lg border border-amber-300 transition-colors shadow-2xs"
+                      className="px-2.5 py-1 min-h-11 sm:min-h-0 bg-white hover:bg-amber-100 text-amber-800 text-xs sm:text-[11px] font-bold rounded-lg border border-amber-300 transition-colors shadow-2xs"
                     >
                       💡 ขอคำใบ้ ({hintLevel}/{hintsList.length})
                     </button>
@@ -636,7 +656,7 @@ export default function MatrixLab() {
                         setLearningFeedback('ยังไม่ถูกต้องครับ ลองคิดดูว่าเราจะรู้ได้อย่างไรว่าเมทริกซ์มี Inverse หรือไม่?');
                       }
                     }}
-                    className={`p-2.5 rounded-xl border text-left font-medium transition-all ${
+                    className={`p-2.5 min-h-11 sm:min-h-0 rounded-xl border text-left font-medium transition-all ${
                       learningAnswer === opt.id
                         ? opt.id === 'A'
                           ? 'bg-emerald-100 border-emerald-400 text-emerald-900 font-bold'
@@ -670,7 +690,7 @@ export default function MatrixLab() {
           {/* Solver Tabs & Method Selection */}
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col gap-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-wrap gap-2">
-              <div className="flex gap-1.5 bg-slate-100 p-1 rounded-xl">
+              <div className="grid grid-cols-2 w-full sm:w-auto sm:flex gap-1.5 bg-slate-100 p-1 rounded-xl">
                 {[
                   { id: 'inverse', label: '1. Matrix Inverse' },
                   { id: 'cramer', label: "2. Cramer's Rule" },
@@ -679,8 +699,11 @@ export default function MatrixLab() {
                 ].map((tab) => (
                   <button
                     key={tab.id}
-                    onClick={() => setActiveTab(tab.id as any)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    onClick={() => {
+                      setActiveTab(tab.id as any);
+                      if (tab.id !== 'compare') recordMethodUse(tab.id as SolvingMethod);
+                    }}
+                    className={`px-3 py-1.5 min-h-11 sm:min-h-0 rounded-lg text-xs font-bold transition-all ${
                       activeTab === tab.id
                         ? 'bg-indigo-600 text-white shadow-sm'
                         : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
@@ -693,6 +716,13 @@ export default function MatrixLab() {
 
               <span className="text-xs text-slate-400 font-medium">เลือกวิธีเพื่อดูขั้นตอนทีละ Step</span>
             </div>
+
+            {justEarnedVersatileBadge && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-bold text-emerald-800 animate-fade-in">
+                🧩 ได้รับตรา "ผู้เชี่ยวชาญรอบด้าน" — ทดลองแก้ระบบสมการครบทั้ง 3 วิธีแล้ว! ทุกวิธีให้คำตอบเดียวกัน
+                เลือกใช้วิธีที่เหมาะกับโจทย์ได้เลย
+              </div>
+            )}
 
             {/* TAB 1: INVERSE METHOD */}
             {activeTab === 'inverse' && (
@@ -720,8 +750,11 @@ export default function MatrixLab() {
                         }`}
                       >
                         <button
-                          onClick={() => setExpandedStep(expandedStep === st.stepNumber ? null : st.stepNumber)}
-                          className={`w-full px-4 py-3 flex items-center justify-between text-left transition-colors ${
+                          onClick={() => {
+                            setExpandedStep(expandedStep === st.stepNumber ? null : st.stepNumber);
+                            recordMethodUse('inverse');
+                          }}
+                          className={`w-full px-4 py-3 min-h-11 sm:min-h-0 gap-2 flex items-center justify-between text-left transition-colors ${
                             isActive ? 'bg-indigo-100/70 hover:bg-indigo-100' : 'bg-white hover:bg-slate-50'
                           }`}
                         >
@@ -795,12 +828,12 @@ export default function MatrixLab() {
                 ) : (
                   <div>
                     {/* Select Matrix to view D, Dx, Dy, Dz */}
-                    <div className="flex gap-2 mb-4">
+                    <div className="flex flex-wrap gap-2 mb-4">
                       {(['D', 'Dx', 'Dy', ...(dimension === '3x3' ? ['Dz'] : [])] as const).map((mKey) => (
                         <button
                           key={mKey}
                           onClick={() => setCramerSelectedMat(mKey)}
-                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
+                          className={`px-4 py-2 min-h-11 sm:min-h-0 rounded-xl text-xs font-bold transition-all border ${
                             cramerSelectedMat === mKey
                               ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
                               : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
@@ -812,7 +845,7 @@ export default function MatrixLab() {
                     </div>
 
                     {/* Display Selected Cramer Matrix with highlighted column */}
-                    <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 flex flex-col items-center justify-center gap-4">
+                    <div className="bg-slate-50 p-4 sm:p-6 rounded-2xl border border-slate-200 flex flex-col items-center justify-center gap-4">
                       <p className="text-xs font-bold text-slate-700">
                         แสดงเมทริกซ์ [{cramerSelectedMat}]
                         {cramerSelectedMat !== 'D' && (
@@ -863,7 +896,7 @@ export default function MatrixLab() {
                       </div>
 
                       {/* Determinant & Value calculated */}
-                      <div className="flex items-center gap-4 text-xs font-bold text-slate-800 bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-2xs">
+                      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs font-bold text-slate-800 bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-2xs">
                         <span>det(D) = {cramerData.detD}</span>
                         <span>•</span>
                         <span>det(Dx) = {cramerData.detDx}</span>
@@ -880,20 +913,20 @@ export default function MatrixLab() {
                       {/* Final Answers via Cramer */}
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 w-full max-w-md mt-2">
                         <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl text-center">
-                          <p className="text-[10px] uppercase font-bold text-indigo-400">x = Dx / D</p>
+                          <p className="text-xs sm:text-[10px] uppercase font-bold text-indigo-400">x = Dx / D</p>
                           <p className="text-lg font-black text-indigo-700">
                             {cramerData.x !== undefined ? formatFractionOrDec(cramerData.x) : '-'}
                           </p>
                         </div>
                         <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl text-center">
-                          <p className="text-[10px] uppercase font-bold text-indigo-400">y = Dy / D</p>
+                          <p className="text-xs sm:text-[10px] uppercase font-bold text-indigo-400">y = Dy / D</p>
                           <p className="text-lg font-black text-indigo-700">
                             {cramerData.y !== undefined ? formatFractionOrDec(cramerData.y) : '-'}
                           </p>
                         </div>
                         {dimension === '3x3' && (
                           <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl text-center">
-                            <p className="text-[10px] uppercase font-bold text-indigo-400">z = Dz / D</p>
+                            <p className="text-xs sm:text-[10px] uppercase font-bold text-indigo-400">z = Dz / D</p>
                             <p className="text-lg font-black text-indigo-700">
                               {cramerData.z !== undefined ? formatFractionOrDec(cramerData.z) : '-'}
                             </p>
@@ -909,12 +942,12 @@ export default function MatrixLab() {
             {/* TAB 3: GAUSS ELIMINATION */}
             {activeTab === 'gauss' && (
               <div className="space-y-4">
-                <div className="flex items-center justify-between bg-slate-50 p-2 rounded-xl border border-slate-200">
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
                   <span className="text-xs font-bold text-slate-700 px-2">โหมดดำเนินการ Gauss:</span>
-                  <div className="flex gap-1">
+                  <div className="grid grid-cols-2 w-full sm:w-auto sm:flex gap-1">
                     <button
                       onClick={() => setGaussMode('auto')}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                      className={`px-3 py-1 min-h-11 sm:min-h-0 rounded-lg text-xs font-bold transition-all ${
                         gaussMode === 'auto'
                           ? 'bg-indigo-600 text-white shadow-sm'
                           : 'text-slate-600 hover:text-slate-900'
@@ -924,7 +957,7 @@ export default function MatrixLab() {
                     </button>
                     <button
                       onClick={() => setGaussMode('manual')}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                      className={`px-3 py-1 min-h-11 sm:min-h-0 rounded-lg text-xs font-bold transition-all ${
                         gaussMode === 'manual'
                           ? 'bg-indigo-600 text-white shadow-sm'
                           : 'text-slate-600 hover:text-slate-900'
@@ -951,20 +984,20 @@ export default function MatrixLab() {
                   </div>
                 ) : (
                   /* MANUAL ROW OPERATIONS MODE */
-                  <div className="space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs">
-                    <div className="flex items-center justify-between">
+                  <div className="space-y-4 bg-slate-50 p-3 sm:p-4 rounded-2xl border border-slate-200 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                       <h4 className="font-bold text-slate-800">เครื่องมือทดลองดำเนินการตามแถว (Elementary Row Operations)</h4>
                       <div className="flex items-center gap-3">
                         <button
                           onClick={handleUndoManualOp}
                           disabled={manualHistory.length === 0}
-                          className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-indigo-600"
+                          className="min-h-11 sm:min-h-0 text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-indigo-600"
                         >
                           <Undo2 className="w-3.5 h-3.5" /> ย้อนกลับ (Undo)
                         </button>
                         <button
                           onClick={handleResetManualGauss}
-                          className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1"
+                          className="min-h-11 sm:min-h-0 text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1"
                         >
                           <RotateCcw className="w-3.5 h-3.5" /> รีเซ็ต
                         </button>
@@ -998,20 +1031,20 @@ export default function MatrixLab() {
                         <p className="font-bold text-emerald-800">{manualFeedback.message}</p>
                         <button
                           onClick={() => setManualFeedback(null)}
-                          className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-2xs transition-colors flex items-center gap-1.5"
+                          className="px-4 py-1.5 min-h-11 sm:min-h-0 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-2xs transition-colors flex items-center gap-1.5"
                         >
                           ทำขั้นตอนถัดไป <ArrowRight className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     ) : (
                       /* Row Operation Builder */
-                      <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
-                        <div className="flex items-center gap-4">
+                      <div className="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 space-y-3">
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
                           <label className="font-bold text-slate-700">ชนิดการดำเนินการ:</label>
                           <select
                             value={opType}
                             onChange={(e) => setOpType(e.target.value as any)}
-                            className="p-1.5 border border-slate-200 rounded-lg text-xs font-semibold outline-none"
+                            className="w-full sm:w-auto p-1.5 min-h-11 sm:min-h-0 border border-slate-200 rounded-lg text-base sm:text-xs font-semibold outline-none"
                           >
                             <option value="swap">สลับแถว (Ri ↔ Rj)</option>
                             <option value="multiply">คูณด้วยค่าคงที่ (Ri → kRi)</option>
@@ -1025,7 +1058,7 @@ export default function MatrixLab() {
                             <select
                               value={opRow1}
                               onChange={(e) => setOpRow1(parseInt(e.target.value))}
-                              className="p-1.5 border border-slate-200 rounded-lg text-xs font-bold"
+                              className="p-1.5 min-h-11 sm:min-h-0 border border-slate-200 rounded-lg text-base sm:text-xs font-bold"
                             >
                               {currentManualAug.map((_, idx) => (
                                 <option key={idx} value={idx}>
@@ -1041,7 +1074,7 @@ export default function MatrixLab() {
                               <select
                                 value={opRow2}
                                 onChange={(e) => setOpRow2(parseInt(e.target.value))}
-                                className="p-1.5 border border-slate-200 rounded-lg text-xs font-bold"
+                                className="p-1.5 min-h-11 sm:min-h-0 border border-slate-200 rounded-lg text-base sm:text-xs font-bold"
                               >
                                 {currentManualAug.map((_, idx) => (
                                   <option key={idx} value={idx}>
@@ -1060,14 +1093,14 @@ export default function MatrixLab() {
                                 value={opK}
                                 onChange={(e) => setOpK(e.target.value)}
                                 placeholder="เช่น 0.5 หรือ -1/2"
-                                className="w-24 p-1.5 border border-slate-200 rounded-lg text-xs font-bold text-center"
+                                className="w-28 sm:w-24 p-1.5 min-h-11 sm:min-h-0 border border-slate-200 rounded-lg text-base sm:text-xs font-bold text-center"
                               />
                             </div>
                           )}
 
                           <button
                             onClick={handleApplyManualOp}
-                            className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-2xs transition-colors ml-auto"
+                            className="w-full sm:w-auto px-4 py-1.5 min-h-11 sm:min-h-0 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-2xs transition-colors sm:ml-auto"
                           >
                             คำนวณขั้นแถว
                           </button>
@@ -1168,7 +1201,7 @@ export default function MatrixLab() {
         {/* Right Column (4 cols): Gemini AI Math Tutor — entry point hidden entirely (not just
             disabled) when the teacher has turned off the AI tutor. */}
         {settings.enableAiTutor && (
-          <div className="lg:col-span-4 h-full min-h-[500px]">
+          <div className="lg:col-span-4 h-[560px] lg:h-full min-h-[500px]">
             <GeminiTutor
               system={system}
               activeMethod={activeTab}
