@@ -17,7 +17,17 @@ import {
   parseNumericString,
 } from '../lib/matrixEngine';
 import { ENGINEERING_ICT_PROBLEMS } from '../lib/engineeringProblems';
-import { loadStudentProgress, saveStudentProgress, loadTeacherSettings, LAB_WALKTHROUGH_XP, SolvingMethod } from '../lib/learningStore';
+import {
+  loadStudentProgress,
+  saveStudentProgress,
+  loadTeacherSettings,
+  LAB_WALKTHROUGH_XP,
+  SolvingMethod,
+  LabPracticeKey,
+  withLabPracticeCompletion
+} from '../lib/learningStore';
+import { InversePractice } from '../components/lab/InversePractice';
+import { CramerPractice } from '../components/lab/CramerPractice';
 import { withActivity, withMethodUsed, VERSATILE_SOLVER_BADGE } from '../lib/motivation';
 import { GeminiTutor } from '../components/GeminiTutor';
 import { GaussStepDisplay } from '../components/GaussStepDisplay';
@@ -68,6 +78,41 @@ interface ManualOpHistoryEntry {
 function augmentedMatricesEqual(a: (number | string)[][], b: (number | string)[][]): boolean {
   if (a.length !== b.length) return false;
   return a.every((row, i) => row.length === b[i].length && row.every((val, j) => String(val) === String(b[i][j])));
+}
+
+// Walkthrough-vs-practice toggle shared by the Inverse, Cramer and Gauss tabs.
+function ModeToggle({
+  label,
+  mode,
+  onChange,
+  autoLabel,
+  manualLabel
+}: {
+  label: string;
+  mode: 'auto' | 'manual';
+  onChange: (mode: 'auto' | 'manual') => void;
+  autoLabel: string;
+  manualLabel: string;
+}) {
+  const btn = (value: 'auto' | 'manual', text: string) => (
+    <button
+      onClick={() => onChange(value)}
+      className={`px-3 py-1 min-h-11 sm:min-h-0 rounded-lg text-xs font-bold transition-all ${
+        mode === value ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+      }`}
+    >
+      {text}
+    </button>
+  );
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
+      <span className="text-xs font-bold text-slate-700 px-2">{label}</span>
+      <div className="grid grid-cols-2 w-full sm:w-auto sm:flex gap-1">
+        {btn('auto', autoLabel)}
+        {btn('manual', manualLabel)}
+      </div>
+    </div>
+  );
 }
 
 const PRESETS = {
@@ -151,6 +196,12 @@ export default function MatrixLab() {
   // Manual Ops is the default so students practice doing the row reduction themselves before
   // reaching for the passive auto-simulation — see the Phase-3 UX brief.
   const [gaussMode, setGaussMode] = useState<'auto' | 'manual'>('manual');
+  // Inverse/Cramer default to the student-computes-it practice, same as Gauss's Manual Ops; the
+  // original read-only walkthrough stays one click away.
+  const [inverseMode, setInverseMode] = useState<'auto' | 'manual'>('manual');
+  const [cramerMode, setCramerMode] = useState<'auto' | 'manual'>('manual');
+  // Last completed practice walkthrough (and XP actually paid for it), for the completion banner.
+  const [practiceDone, setPracticeDone] = useState<{ key: LabPracticeKey; systemKey: string; xp: number } | null>(null);
 
   // Manual Gauss Operation State — matrices here can contain fraction STRINGS (e.g. "1/2"), not
   // just plain numbers, since applyRowOperation() returns the same Rational-formatted shape as
@@ -263,6 +314,36 @@ export default function MatrixLab() {
     };
   }, [dimension, matrixStrA, vectorStrB]);
 
+  // Identifies the current system; the practice components are keyed by it so editing the matrix,
+  // loading a preset or switching dimension restarts them from a clean slate.
+  const systemKey = `${dimension}|${JSON.stringify(system.A)}|${JSON.stringify(system.B)}`;
+
+  // One-time award per method + size (see withLabPracticeCompletion). Re-reads storage first, like
+  // recordMethodUse, so it can't overwrite XP another component added since this page loaded.
+  const handlePracticeComplete = (method: 'inverse' | 'cramer') => {
+    const key = `${method}-${dimension}` as LabPracticeKey;
+    const fresh = loadStudentProgress();
+    const { progress: next, xpAwarded } = withLabPracticeCompletion(fresh, key, settings.enableXp);
+    const updated = withActivity(withMethodUsed(next, method, settings.enableBadges));
+    if (updated !== fresh) {
+      saveStudentProgress(updated);
+      setProgress(updated);
+    }
+    setPracticeDone({ key, systemKey, xp: xpAwarded });
+  };
+
+  const renderPracticeDone = (method: 'inverse' | 'cramer') =>
+    practiceDone && practiceDone.key === `${method}-${dimension}` && practiceDone.systemKey === systemKey ? (
+      <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 font-bold text-center text-xs">
+        ✓ ทำครบทุกขั้นตอนแล้ว!
+        {practiceDone.xp > 0
+          ? <span> — ได้รับ +{practiceDone.xp} XP!</span>
+          : progress.matrixLabPracticeCompleted.includes(practiceDone.key) && settings.enableXp
+          ? <span className="font-medium"> (เคยได้รับ XP ของแบบฝึก {dimension} นี้ไปแล้ว — ฝึกซ้ำกับโจทย์อื่นได้เรื่อยๆ)</span>
+          : null}
+      </div>
+    ) : null;
+
   // Solvers calculation
   const summary = useMemo(() => solveLinearSystem(system), [system]);
   const inverseData = useMemo(() => getInverseSteps(system), [system]);
@@ -367,7 +448,7 @@ export default function MatrixLab() {
   // entirely from the method-comparison tab per the teacher's request.
   const lastInverseStepNumber = inverseData.steps[inverseData.steps.length - 1]?.stepNumber;
   const showVerificationBox =
-    (activeTab === 'inverse' && expandedStep === lastInverseStepNumber) ||
+    (activeTab === 'inverse' && inverseMode === 'auto' && expandedStep === lastInverseStepNumber) ||
     (activeTab === 'gauss' && (gaussMode === 'auto' || isManualGaussComplete));
 
   // One-time XP award for actually completing the manual walkthrough (reaching RREF), not just
@@ -734,7 +815,25 @@ export default function MatrixLab() {
                   </p>
                 </div>
 
-                {!inverseData.hasInverse ? (
+                <ModeToggle
+                  label="โหมดวิธี Inverse:"
+                  mode={inverseMode}
+                  onChange={setInverseMode}
+                  autoLabel="ดูขั้นตอน (Walkthrough)"
+                  manualLabel="ทำด้วยตนเอง (Practice)"
+                />
+
+                {inverseMode === 'manual' ? (
+                  <div className="space-y-3">
+                    <InversePractice
+                      key={systemKey}
+                      A={system.A}
+                      B={system.B}
+                      onComplete={() => handlePracticeComplete('inverse')}
+                    />
+                    {renderPracticeDone('inverse')}
+                  </div>
+                ) : !inverseData.hasInverse ? (
                   <div className="p-4 bg-rose-50 rounded-xl border border-rose-200 text-rose-800 text-xs font-medium">
                     ⚠️ det(A) = 0 เมทริกซ์นี้ไม่มีตัวผกผัน (Inverse) จึงไม่สามารถใช้วิธี Matrix Inverse Method ได้
                   </div>
@@ -821,7 +920,26 @@ export default function MatrixLab() {
                   </p>
                 </div>
 
-                {cramerData.detD === 0 ? (
+                <ModeToggle
+                  label="โหมดกฎของคราเมอร์:"
+                  mode={cramerMode}
+                  onChange={setCramerMode}
+                  autoLabel="ดูผลลัพธ์ (Walkthrough)"
+                  manualLabel="ทำด้วยตนเอง (Practice)"
+                />
+
+                {cramerMode === 'manual' ? (
+                  <div className="space-y-3">
+                    <CramerPractice
+                      key={systemKey}
+                      A={system.A}
+                      B={system.B}
+                      variables={system.variables}
+                      onComplete={() => handlePracticeComplete('cramer')}
+                    />
+                    {renderPracticeDone('cramer')}
+                  </div>
+                ) : cramerData.detD === 0 ? (
                   <div className="p-4 bg-rose-50 rounded-xl border border-rose-200 text-rose-800 text-xs font-medium">
                     ⚠️ D = det(A) = 0 ไม่สามารถใช้ Cramer's Rule ในการหาคำตอบชุดเดียวได้
                   </div>
@@ -942,31 +1060,13 @@ export default function MatrixLab() {
             {/* TAB 3: GAUSS ELIMINATION */}
             {activeTab === 'gauss' && (
               <div className="space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
-                  <span className="text-xs font-bold text-slate-700 px-2">โหมดดำเนินการ Gauss:</span>
-                  <div className="grid grid-cols-2 w-full sm:w-auto sm:flex gap-1">
-                    <button
-                      onClick={() => setGaussMode('auto')}
-                      className={`px-3 py-1 min-h-11 sm:min-h-0 rounded-lg text-xs font-bold transition-all ${
-                        gaussMode === 'auto'
-                          ? 'bg-indigo-600 text-white shadow-sm'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      อัตโนมัติ (Simulation)
-                    </button>
-                    <button
-                      onClick={() => setGaussMode('manual')}
-                      className={`px-3 py-1 min-h-11 sm:min-h-0 rounded-lg text-xs font-bold transition-all ${
-                        gaussMode === 'manual'
-                          ? 'bg-indigo-600 text-white shadow-sm'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      ทำด้วยตนเอง (Manual Ops)
-                    </button>
-                  </div>
-                </div>
+                <ModeToggle
+                  label="โหมดดำเนินการ Gauss:"
+                  mode={gaussMode}
+                  onChange={setGaussMode}
+                  autoLabel="อัตโนมัติ (Simulation)"
+                  manualLabel="ทำด้วยตนเอง (Manual Ops)"
+                />
 
                 {gaussMode === 'auto' ? (
                   <div className="space-y-3">

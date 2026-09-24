@@ -67,6 +67,11 @@ export interface StudentProgress {
   // tab, so re-visiting an already-completed walkthrough never re-awards XP.
   matrixLabGaussCompleted: boolean;
   higherOrderLabCompleted: boolean;
+  // One-time completion keys for Matrix Lab's interactive Inverse/Cramer practice (see
+  // withLabPracticeCompletion): 'inverse-2x2' | 'inverse-3x3' | 'cramer-2x2' | 'cramer-3x3'.
+  // Separate per method AND size — a 3x3 walkthrough is far more work than a 2x2 one, and
+  // switching tabs/dimensions back and forth can never re-trigger an award already listed here.
+  matrixLabPracticeCompleted: string[];
   // Solving methods the student has actually used in Matrix Lab (opened that method's tab or,
   // for the default Inverse tab, expanded one of its steps) — drives the Versatile Solver badge.
   // Local-only (not synced to the classroom roster), like checkQuestionXpAwarded.
@@ -113,6 +118,31 @@ export const DIAGNOSTIC_TEST_XP = 25;
 // tap — but far less than the study + practice behind finishing a whole lesson (+50). Sits just
 // above the live-poll award on the same scale.
 export const LAB_WALKTHROUGH_XP = 15;
+
+export type LabPracticeKey = 'inverse-2x2' | 'inverse-3x3' | 'cramer-2x2' | 'cramer-3x3';
+
+/**
+ * Records a completed Inverse/Cramer practice walkthrough and pays LAB_WALKTHROUGH_XP once per
+ * key (same scale and anti-farm reasoning as matrixLabGaussCompleted). Returns the same object when
+ * the key was already completed. Completion is recorded even while XP is disabled — enableXp only
+ * pauses the increment — so re-enabling XP later never pays out retroactively.
+ */
+export function withLabPracticeCompletion(
+  progress: StudentProgress,
+  key: LabPracticeKey,
+  xpEnabled: boolean
+): { progress: StudentProgress; xpAwarded: number } {
+  if (progress.matrixLabPracticeCompleted.includes(key)) return { progress, xpAwarded: 0 };
+  const xpAwarded = xpEnabled ? LAB_WALKTHROUGH_XP : 0;
+  return {
+    progress: {
+      ...progress,
+      xp: progress.xp + xpAwarded,
+      matrixLabPracticeCompleted: [...progress.matrixLabPracticeCompleted, key]
+    },
+    xpAwarded
+  };
+}
 
 export interface TeacherSettings {
   masteryThreshold: number; // default 70
@@ -1278,6 +1308,7 @@ export const defaultStudentProgress: StudentProgress = {
   checkQuestionFirstTryMissed: [],
   matrixLabGaussCompleted: false,
   higherOrderLabCompleted: false,
+  matrixLabPracticeCompleted: [],
   methodsUsed: [],
   activityDates: [],
   hasCompletedSurvey: false,
