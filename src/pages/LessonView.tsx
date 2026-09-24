@@ -25,7 +25,7 @@ import { resolveCheckAttempt, lessonCheckScore } from '../lib/checkAttempts';
 import { formatFractionOrDec } from '../lib/matrixEngine';
 import { shuffleOptions } from '../lib/shuffleOptions';
 import { getStudentId } from '../lib/classroomSync';
-import { withActivity, badgesForLessonCompletion } from '../lib/motivation';
+import { withActivity, withEarnedBadges } from '../lib/motivation';
 import {
   SystemDisplay,
   MatrixEquationDisplay,
@@ -181,18 +181,13 @@ export default function LessonView() {
       updatedProgress.lessonCheckScores = { ...updatedProgress.lessonCheckScores, [lesson.id]: checkScore };
     }
 
-    // Award badges if applicable (rules in lib/motivation.ts) — earnedBadges is never touched at
-    // all while badges are disabled, so nothing is retroactively earned the moment a teacher
-    // re-enables them.
-    if (settings.enableBadges) {
-      updatedProgress.earnedBadges = [
-        ...updatedProgress.earnedBadges,
-        ...badgesForLessonCompletion(lesson.id, newCompleted, updatedProgress.earnedBadges)
-      ];
-    }
+    // Award badges if applicable (rules in lib/motivation.ts; the method badges also need the
+    // matching Matrix Lab walkthrough). Nothing is awarded while badges are disabled, so nothing
+    // is retroactively earned the moment a teacher re-enables them.
+    const withBadges = withEarnedBadges(updatedProgress, settings.enableBadges);
 
-    saveStudentProgress(updatedProgress);
-    setProgress(updatedProgress);
+    saveStudentProgress(withBadges);
+    setProgress(withBadges);
     setCompletedThisSession(true);
   };
 

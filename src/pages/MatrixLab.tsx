@@ -28,7 +28,7 @@ import {
 } from '../lib/learningStore';
 import { InversePractice } from '../components/lab/InversePractice';
 import { CramerPractice } from '../components/lab/CramerPractice';
-import { withActivity, withMethodUsed, VERSATILE_SOLVER_BADGE } from '../lib/motivation';
+import { withActivity, withMethodUsed, withEarnedBadges, VERSATILE_SOLVER_BADGE } from '../lib/motivation';
 import { GeminiTutor } from '../components/GeminiTutor';
 import { GaussStepDisplay } from '../components/GaussStepDisplay';
 import {
@@ -324,7 +324,9 @@ export default function MatrixLab() {
     const key = `${method}-${dimension}` as LabPracticeKey;
     const fresh = loadStudentProgress();
     const { progress: next, xpAwarded } = withLabPracticeCompletion(fresh, key, settings.enableXp);
-    const updated = withActivity(withMethodUsed(next, method, settings.enableBadges));
+    // May also complete a method badge's lab requirement (inverse_solver, cramer_specialist,
+    // determinant_master) — see LESSON_BADGE_RULES in lib/motivation.ts.
+    const updated = withEarnedBadges(withActivity(withMethodUsed(next, method, settings.enableBadges)), settings.enableBadges);
     if (updated !== fresh) {
       saveStudentProgress(updated);
       setProgress(updated);
@@ -459,16 +461,20 @@ export default function MatrixLab() {
   // later doesn't retroactively pay out for a walkthrough finished while it was off.
   useEffect(() => {
     if (isManualGaussComplete && !progress.matrixLabGaussCompleted) {
-      const updated = withActivity({
-        ...progress,
-        xp: settings.enableXp ? progress.xp + LAB_WALKTHROUGH_XP : progress.xp,
-        matrixLabGaussCompleted: true
-      });
+      // Completing the walkthrough can also complete the Gaussian Expert badge's lab requirement.
+      const updated = withEarnedBadges(
+        withActivity({
+          ...progress,
+          xp: settings.enableXp ? progress.xp + LAB_WALKTHROUGH_XP : progress.xp,
+          matrixLabGaussCompleted: true
+        }),
+        settings.enableBadges
+      );
       saveStudentProgress(updated);
       setProgress(updated);
       if (settings.enableXp) setJustEarnedLabXp(true);
     }
-  }, [isManualGaussComplete, progress, settings.enableXp]);
+  }, [isManualGaussComplete, progress, settings.enableXp, settings.enableBadges]);
 
   // Hints array
   const hintsList = [

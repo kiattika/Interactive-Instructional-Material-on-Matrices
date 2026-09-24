@@ -7,12 +7,14 @@ interface CramerPracticeProps {
   A: number[][];
   B: number[];
   variables: string[];
-  onComplete: () => void; // fired once, when every interactive step is done
+  onComplete: () => void; // fired once, when the student has computed every determinant (D ≠ 0)
 }
 
 // Matrix Lab › Cramer › "ทำด้วยตนเอง": the student computes D, then D_x, D_y (and D_z for 3x3)
 // with the SAME interactive determinant component, the replaced column highlighted each time.
-// If D = 0 the flow stops there with the conclusion. The final ratios are shown automatically.
+// If D = 0 the flow stops there with the conclusion — and does NOT count as a completed walkthrough:
+// completion feeds the Cramer Specialist badge ("ใช้กฎของคราเมอร์แก้สมการ"), which a system Cramer
+// can't solve shouldn't grant. The final ratios are shown automatically.
 // Remount (new key) when the system changes.
 export const CramerPractice: React.FC<CramerPracticeProps> = ({ A, B, variables, onComplete }) => {
   const n = A.length;
@@ -36,9 +38,9 @@ export const CramerPractice: React.FC<CramerPracticeProps> = ({ A, B, variables,
   const allDone = current === -1;
 
   useEffect(() => {
-    if (singular || allDone) onComplete();
+    if (allDone) onComplete(); // never reached when D = 0 (the Dx/Dy/Dz steps don't open)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [singular, allDone]);
+  }, [allDone]);
 
   const fmt = (v: number) => formatFractionOrDec(v);
   const shown = singular ? 1 : allDone ? steps.length : current + 1;
@@ -75,6 +77,7 @@ export const CramerPractice: React.FC<CramerPracticeProps> = ({ A, B, variables,
       {singular && (
         <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl font-bold text-rose-800">
           D = 0 → ตัวหารเป็นศูนย์ จึงใช้กฎของคราเมอร์หาคำตอบเดียวไม่ได้ (ระบบนี้ไม่มีคำตอบ หรือมีคำตอบนับไม่ถ้วน — ตรวจด้วย Gauss Elimination)
+          — เลือกโจทย์ที่ D ≠ 0 เพื่อฝึกกฎของคราเมอร์จนได้คำตอบ
         </div>
       )}
 
