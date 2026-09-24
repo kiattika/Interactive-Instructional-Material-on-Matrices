@@ -4,6 +4,8 @@ import {
   detMistakeHint,
   cofactorSign,
   adjugateFromMinors,
+  checkTransposeCells,
+  termProduct,
   minorMatrix
 } from '../lib/determinantPractice';
 import { det, adjugate2x2, adjugate3x3 } from '../lib/matrixEngine';
@@ -53,6 +55,8 @@ assert(JSON.stringify(adjugate2x2([[2, 1], [1, -1]])) === JSON.stringify([[-1, -
 
 const dec = determinantBreakdown([[0.5, 1.5], [2, 0.25]]);
 assert(dec.det === det([[0.5, 1.5], [2, 0.25]]), 'decimal entries: breakdown det matches det() (no float drift)');
+const thirds = determinantBreakdown([[0.333, 1, 0], [0, 0.333, 0], [0, 0, 0.333]]);
+assert(isAnswerCorrect('0.036926037', thirds.forward[0].product), 'decimal Sarrus product 0.333³ = 0.036926037 accepted exactly (not truncated to 6 decimals)');
 
 // --- Answer checking + hints ---------------------------------------------------------------------
 assert(isAnswerCorrect('-3', -3) && isAnswerCorrect(' -3 ', -3) && isAnswerCorrect('-6/2', -3), 'accepts integers, spaces and equivalent fractions');
@@ -63,6 +67,25 @@ assert(detMistakeHint(String(b3.backwardSum - b3.forwardSum), b3)!.includes('ก
 assert(detMistakeHint('99', b3) === null, 'no specific hint for an unrelated wrong value');
 
 assert([cofactorSign(0, 0), cofactorSign(0, 1), cofactorSign(1, 1), cofactorSign(2, 1)].join(',') === '1,-1,1,-1', 'checkerboard cofactor signs');
+
+// --- X = A⁻¹B products keep full precision (regression: 6-decimal rounding rejected "5/3") ------------
+const third = 1 / 3;
+assert(isAnswerCorrect('5/3', termProduct([third, 5])), 'row product (1/3)·5 accepts the exact fraction 5/3');
+assert(isAnswerCorrect('-2/3', termProduct([-2 / 3, 1])) && isAnswerCorrect('1/10', termProduct([1 / 10, 1])), 'other fractional A⁻¹ entries accept exact fractions');
+assert(!isAnswerCorrect('1.67', termProduct([third, 5])), 'a rounded decimal (1.67) is not accepted as exact');
+const invRow = [1 / 3, 1 / 3]; // A = [[2,1],[1,-1]] -> A⁻¹ row 1, B = [5, 1]: x = 5/3 + 1/3 = 2
+assert(isAnswerCorrect('2', termProduct([invRow[0], 5]) + termProduct([invRow[1], 1])), 'summing the exact products gives x = 2');
+
+// --- Transpose fill-in (3x3 adj = Cof^T) --------------------------------------------------------------
+const cof = [[0, 5, 5], [2, -4, 2], [2, 1, -3]];
+const asText = (m: number[][]) => m.map((r) => r.map(String));
+const good = checkTransposeCells(asText([[0, 2, 2], [5, -4, 1], [5, 2, -3]]), cof);
+assert(good.results.every((r) => r.every(Boolean)) && !good.untransposed, 'the correct transpose passes every cell (cell [i][j] = cof[j][i])');
+const copied = checkTransposeCells(asText(cof), cof);
+assert(copied.untransposed && !copied.results[0][1] && copied.results[0][0], 'copying Cof(A) without transposing is flagged as that specific mistake (diagonal cells still pass)');
+const oneOff = checkTransposeCells(asText([[0, 2, 2], [5, -4, 1], [5, 2, 99]]), cof);
+assert(!oneOff.results[2][2] && !oneOff.untransposed, 'an unrelated wrong value is marked wrong without the "not transposed" hint');
+assert(checkTransposeCells([['0', '2', '2'], ['5', '-4', '1'], ['5', '4/2', '-3']], cof).results[2][1], 'fractions equal to the expected value are accepted');
 
 // --- One-time XP per method + size -----------------------------------------------------------------
 const start = { ...defaultStudentProgress, xp: 100, matrixLabPracticeCompleted: [] as string[] };

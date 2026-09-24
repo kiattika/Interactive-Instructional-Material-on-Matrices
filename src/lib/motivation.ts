@@ -4,15 +4,26 @@
 // components/BadgesAndCertificate.tsx's ALL_BADGES; this module only knows badge ids and rules,
 // and is the single source for those rules — LessonView/MatrixLab award with them and the nudge
 // measures against them, so the two can't drift apart.
-import { CURRICULUM_LESSONS, StudentProgress, SolvingMethod } from './learningStore';
+import { CURRICULUM_LESSONS, StudentProgress, SolvingMethod, LabPracticeKey } from './learningStore';
 
-// Completing lesson N earns the badge (lesson content each badge is about).
-export const LESSON_COMPLETION_BADGES: Record<number, string> = {
-  2: 'matrix_explorer',
-  3: 'determinant_master',
-  5: 'inverse_solver',
-  6: 'cramer_specialist',
-  8: 'gaussian_expert'
+const anyPractice = (p: StudentProgress, keys: LabPracticeKey[]) => keys.some((k) => p.matrixLabPracticeCompleted.includes(k));
+
+// Lesson badges: completing lesson N, plus — for the four method badges, whose descriptions claim
+// demonstrated skill ("แก้สมการ ... ได้อย่างถูกต้อง") — the matching hands-on Matrix Lab walkthrough
+// completed at least once (any size). Reading the lesson and answering its check-questions alone
+// is not enough for those four.
+interface LessonBadgeRule {
+  lessonId: number;
+  labDone?: (p: StudentProgress) => boolean;
+}
+export const LESSON_BADGE_RULES: Record<string, LessonBadgeRule> = {
+  matrix_explorer: { lessonId: 2 },
+  // No walkthrough of its own: both the Inverse and Cramer practice have the student compute
+  // determinants by hand (the shared InteractiveDeterminant), so either one counts.
+  determinant_master: { lessonId: 3, labDone: (p) => anyPractice(p, ['inverse-2x2', 'inverse-3x3', 'cramer-2x2', 'cramer-3x3']) },
+  inverse_solver: { lessonId: 5, labDone: (p) => anyPractice(p, ['inverse-2x2', 'inverse-3x3']) },
+  cramer_specialist: { lessonId: 6, labDone: (p) => anyPractice(p, ['cramer-2x2', 'cramer-3x3']) },
+  gaussian_expert: { lessonId: 8, labDone: (p) => p.matrixLabGaussCompleted }
 };
 export const MATRIX_MASTER_BADGE = 'matrix_master';
 
@@ -21,15 +32,27 @@ export const MATRIX_MASTER_BADGE = 'matrix_master';
 export const VERSATILE_SOLVER_BADGE = 'versatile_solver';
 export const SOLVING_METHODS: readonly SolvingMethod[] = ['inverse', 'cramer', 'gauss'];
 
-/** Badges a lesson completion newly qualifies for (caller skips this while badges are disabled). */
-export function badgesForLessonCompletion(lessonId: number, completedLessons: number[], earned: string[]): string[] {
-  const out: string[] = [];
-  const lessonBadge = LESSON_COMPLETION_BADGES[lessonId];
-  if (lessonBadge && !earned.includes(lessonBadge)) out.push(lessonBadge);
-  if (completedLessons.length >= CURRICULUM_LESSONS.length && !earned.includes(MATRIX_MASTER_BADGE)) {
-    out.push(MATRIX_MASTER_BADGE);
-  }
-  return out;
+/** Whether current progress meets a lesson badge's or Matrix Master's criteria. */
+export function qualifiesForBadge(badgeId: string, progress: StudentProgress): boolean {
+  if (badgeId === MATRIX_MASTER_BADGE) return progress.completedLessons.length >= CURRICULUM_LESSONS.length;
+  const rule = LESSON_BADGE_RULES[badgeId];
+  if (!rule) return false;
+  return progress.completedLessons.includes(rule.lessonId) && (!rule.labDone || rule.labDone(progress));
+}
+
+/**
+ * Awards every lesson badge / Matrix Master the student now qualifies for and hasn't earned yet.
+ * Called after BOTH kinds of events that can complete a criterion — finishing a lesson
+ * (LessonView) and finishing a lab walkthrough (MatrixLab) — since they can happen in either order.
+ * Returns the same object when nothing new is earned. Never awards while badges are disabled
+ * (nothing retroactive the moment a teacher re-enables them); badges already earned are never revoked.
+ */
+export function withEarnedBadges(progress: StudentProgress, badgesEnabled: boolean): StudentProgress {
+  if (!badgesEnabled) return progress;
+  const newlyEarned = [...Object.keys(LESSON_BADGE_RULES), MATRIX_MASTER_BADGE].filter(
+    (id) => !progress.earnedBadges.includes(id) && qualifiesForBadge(id, progress)
+  );
+  return newlyEarned.length ? { ...progress, earnedBadges: [...progress.earnedBadges, ...newlyEarned] } : progress;
 }
 
 /**
@@ -52,7 +75,8 @@ export function withMethodUsed(progress: StudentProgress, method: SolvingMethod,
 /**
  * Fraction (0..1) of the way to earning a badge, or null for a badge with no measurable rule.
  * Lesson badges count lessons 1..N completed out of N — the path is sequential, so that's how
- * far along the student is toward reaching and finishing lesson N.
+ * far along the student is toward reaching and finishing lesson N. For the lab-gated method
+ * badges that lesson part is half, and the Matrix Lab walkthrough is the other half.
  */
 export function badgeProgress(badgeId: string, progress: StudentProgress): number | null {
   if (badgeId === MATRIX_MASTER_BADGE) {
@@ -61,11 +85,11 @@ export function badgeProgress(badgeId: string, progress: StudentProgress): numbe
   if (badgeId === VERSATILE_SOLVER_BADGE) {
     return SOLVING_METHODS.filter((m) => progress.methodsUsed.includes(m)).length / SOLVING_METHODS.length;
   }
-  const entry = Object.entries(LESSON_COMPLETION_BADGES).find(([, id]) => id === badgeId);
-  if (!entry) return null;
-  const lessonId = Number(entry[0]);
-  const done = progress.completedLessons.filter((id) => id <= lessonId).length;
-  return Math.min(1, done / lessonId);
+  const rule = LESSON_BADGE_RULES[badgeId];
+  if (!rule) return null;
+  const lessonPart = Math.min(1, progress.completedLessons.filter((id) => id <= rule.lessonId).length / rule.lessonId);
+  // Lab-gated badges: the lesson path and the hands-on walkthrough each count for half.
+  return rule.labDone ? lessonPart / 2 + (rule.labDone(progress) ? 0.5 : 0) : lessonPart;
 }
 
 export interface BadgeNudge {

@@ -1,6 +1,6 @@
 import { defaultStudentProgress, StudentProgress, CURRICULUM_LESSONS } from '../lib/learningStore';
 import {
-  badgesForLessonCompletion,
+  withEarnedBadges,
   badgeProgress,
   computeLearningStreak,
   getNextBadgeNudge,
@@ -41,18 +41,33 @@ for (const id of BADGE_IDS) {
 }
 assert(BADGE_IDS.includes(VERSATILE_SOLVER_BADGE), 'Versatile Solver is listed in ALL_BADGES');
 
-// --- Lesson badges: same behavior LessonView had before the rules moved here -----------------
+// --- Lesson badges (+ the Matrix Lab requirement for the four method badges) -----------------
+const earned = (o: Partial<StudentProgress>) => withEarnedBadges(fresh(o), true).earnedBadges;
+assert(JSON.stringify(earned({ completedLessons: [1, 2] })) === JSON.stringify(['matrix_explorer']), 'finishing lesson 2 awards matrix_explorer (no lab requirement)');
+const already = fresh({ completedLessons: [1, 2], earnedBadges: ['matrix_explorer'] });
+assert(withEarnedBadges(already, true) === already, 'an already-earned badge is not re-awarded (same object returned)');
+assert(earned({ completedLessons: [1, 2, 3, 4] }).length === 1, 'a lesson with no badge (4) awards nothing extra');
+
+const lessons8 = [1, 2, 3, 4, 5, 6, 7, 8];
+const lessonsOnly = earned({ completedLessons: lessons8 });
 assert(
-  JSON.stringify(badgesForLessonCompletion(2, [1, 2], [])) === JSON.stringify(['matrix_explorer']),
-  'finishing lesson 2 awards matrix_explorer'
+  !['determinant_master', 'inverse_solver', 'cramer_specialist', 'gaussian_expert'].some((b) => lessonsOnly.includes(b)),
+  'lessons 3/5/6/8 alone do NOT award the four method badges any more'
 );
-assert(badgesForLessonCompletion(2, [1, 2], ['matrix_explorer']).length === 0, 'an already-earned lesson badge is not re-awarded');
-assert(badgesForLessonCompletion(4, [1, 2, 3, 4], []).length === 0, 'a lesson with no badge awards nothing');
+assert(earned({ matrixLabPracticeCompleted: ['inverse-3x3'], matrixLabGaussCompleted: true }).length === 0, 'the lab walkthroughs alone (lessons not done) award nothing');
+const inv = earned({ completedLessons: lessons8, matrixLabPracticeCompleted: ['inverse-2x2'] });
+assert(inv.includes('inverse_solver') && inv.includes('determinant_master') && !inv.includes('cramer_specialist') && !inv.includes('gaussian_expert'),
+  'lesson + Inverse practice (any size) -> inverse_solver, and it also satisfies determinant_master; not cramer/gauss');
+assert(earned({ completedLessons: lessons8, matrixLabPracticeCompleted: ['cramer-3x3'] }).includes('cramer_specialist'), 'lesson 6 + Cramer practice (3x3 counts too) -> cramer_specialist');
+assert(earned({ completedLessons: lessons8, matrixLabGaussCompleted: true }).includes('gaussian_expert'), 'lesson 8 + Manual Ops walkthrough -> gaussian_expert');
+assert(!withEarnedBadges(fresh({ completedLessons: lessons8, matrixLabGaussCompleted: true }), false).earnedBadges.length, 'nothing is awarded while badges are disabled');
+const keep = fresh({ completedLessons: [1, 2, 3, 4, 5], earnedBadges: ['inverse_solver'] });
+assert(withEarnedBadges(keep, true).earnedBadges.includes('inverse_solver'), 'a badge earned under the old lesson-only rule is kept, never revoked');
+
 const allLessons = CURRICULUM_LESSONS.map((l) => l.id);
-assert(
-  badgesForLessonCompletion(12, allLessons, []).includes('matrix_master'),
-  'completing every lesson awards matrix_master'
-);
+assert(earned({ completedLessons: allLessons }).includes('matrix_master'), 'completing every lesson awards matrix_master (no lab requirement)');
+assert(badgeProgress('inverse_solver', fresh({ completedLessons: [1, 2, 3, 4, 5] })) === 0.5, 'lab-gated badge: all lessons to 5 done but no lab = 50%');
+assert(badgeProgress('inverse_solver', fresh({ completedLessons: [1, 2, 3, 4, 5], matrixLabPracticeCompleted: ['inverse-2x2'] })) === 1, 'lessons + lab = 100%');
 
 // --- Versatile Solver -------------------------------------------------------------------------
 let p = fresh();

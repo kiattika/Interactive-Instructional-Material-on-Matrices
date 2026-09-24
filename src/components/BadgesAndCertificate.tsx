@@ -24,7 +24,7 @@ export const ALL_BADGES: BadgeInfo[] = [
     id: 'determinant_master',
     name: 'Determinant Master',
     thaiName: 'ปรมาจารย์ Determinant',
-    description: 'เชี่ยวชาญการหาค่า det(A) และประเมินลักษณะคำตอบ',
+    description: 'เชี่ยวชาญการหาค่า det(A) และประเมินลักษณะคำตอบ (เรียนบทที่ 3 + ฝึก Inverse หรือ Cramer ใน Matrix Lab จนจบ)',
     icon: '💎',
     category: 'matrix_ops'
   },
@@ -32,7 +32,7 @@ export const ALL_BADGES: BadgeInfo[] = [
     id: 'inverse_solver',
     name: 'Inverse Solver',
     thaiName: 'ผู้เชี่ยวชาญ Inverse Matrix',
-    description: 'แก้สมการเชิงเส้นโดยใช้ A⁻¹B ได้อย่างถูกต้อง',
+    description: 'แก้สมการเชิงเส้นโดยใช้ A⁻¹B ได้อย่างถูกต้อง (เรียนบทที่ 5 + ฝึกวิธี Inverse ใน Matrix Lab จนได้คำตอบ X)',
     icon: '🔑',
     category: 'methods'
   },
@@ -40,7 +40,7 @@ export const ALL_BADGES: BadgeInfo[] = [
     id: 'cramer_specialist',
     name: 'Cramer Specialist',
     thaiName: 'ผู้เชี่ยวชาญกฎของคราเมอร์',
-    description: 'ใช้กฎของคราเมอร์แก้สมการและแทนที่คอลัมน์แม่นยำ',
+    description: 'ใช้กฎของคราเมอร์แก้สมการและแทนที่คอลัมน์แม่นยำ (เรียนบทที่ 6 + ฝึกกฎของคราเมอร์ใน Matrix Lab จนจบ)',
     icon: '⚡',
     category: 'methods'
   },
@@ -48,7 +48,7 @@ export const ALL_BADGES: BadgeInfo[] = [
     id: 'gaussian_expert',
     name: 'Gaussian Expert',
     thaiName: 'ผู้เชี่ยวชาญ Gaussian Elimination',
-    description: 'เชี่ยวชาญการทำ Row Operations และ Row Echelon Form',
+    description: 'เชี่ยวชาญการทำ Row Operations และ Row Echelon Form (เรียนบทที่ 8 + ทำ Manual Ops ใน Matrix Lab จนได้ RREF)',
     icon: '🎯',
     category: 'methods'
   },

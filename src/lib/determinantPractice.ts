@@ -27,7 +27,7 @@ export interface DeterminantBreakdown {
 function term(M: number[][], cells: Cell[]): DiagonalTerm {
   const n = M.length;
   const factors = cells.map(([r, c]) => M[r][c % n]);
-  return { cells, factors, product: round(factors.reduce((a, v) => a * v, 1)) };
+  return { cells, factors, product: termProduct(factors) };
 }
 
 /** 2x2: ad (forward) and bc (backward). 3x3: Sarrus's rule on the matrix extended with its first two columns. */
@@ -42,9 +42,18 @@ export function determinantBreakdown(M: number[][]): DeterminantBreakdown {
     size === 2
       ? [term(M, [[0, 1], [1, 0]])]
       : [0, 1, 2].map((j) => term(M, [[0, j + 2], [1, j + 1], [2, j]]));
-  const forwardSum = round(forward.reduce((a, t) => a + t.product, 0));
-  const backwardSum = round(backward.reduce((a, t) => a + t.product, 0));
-  return { size, forward, backward, forwardSum, backwardSum, det: round(forwardSum - backwardSum) };
+  const forwardSum = round(forward.reduce((a, t) => a + t.product, 0), 10);
+  const backwardSum = round(backward.reduce((a, t) => a + t.product, 0), 10);
+  return { size, forward, backward, forwardSum, backwardSum, det: round(forwardSum - backwardSum, 10) };
+}
+
+/**
+ * Product of a term's factors, rounded only at 10 decimals (float-noise cleanup). Deliberately NOT
+ * the engine's 6-decimal default: with fractional factors such as A⁻¹'s 1/3, rounding to 6 places
+ * turned (1/3)·5 into 1.666667 and rejected a student's exact answer "5/3".
+ */
+export function termProduct(factors: number[]): number {
+  return round(factors.reduce((a, v) => a * v, 1), 10);
 }
 
 /** Parses a typed answer (integer, decimal or a/b fraction) and compares it to the expected value. */
@@ -73,6 +82,17 @@ export function cofactorSign(i: number, j: number): 1 | -1 {
 }
 
 export { minorMatrix };
+
+/**
+ * Checks a student's transpose of the cofactor matrix: output cell [i][j] must equal cof[j][i].
+ * `untransposed` flags the classic slip — a wrong cell that holds cof[i][j] instead (copied the
+ * cofactor matrix without swapping rows and columns).
+ */
+export function checkTransposeCells(inputs: string[][], cof: number[][]): { results: boolean[][]; untransposed: boolean } {
+  const results = inputs.map((row, i) => row.map((v, j) => isAnswerCorrect(v, cof[j][i])));
+  const untransposed = inputs.some((row, i) => row.some((v, j) => !results[i][j] && isAnswerCorrect(v, cof[i][j])));
+  return { results, untransposed };
+}
 
 /** Builds cofactor matrix and adjugate (its transpose) from the 9 minor determinants. */
 export function adjugateFromMinors(minors: number[][]): { cofactors: number[][]; adjugate: number[][] } {
