@@ -160,7 +160,7 @@ export function formatFractionOrDec(num: number, preferFraction: boolean = true)
 }
 
 // Minor: remove row `row` and column `col` from matrix A
-function minorMatrix(A: Matrix, row: number, col: number): Matrix {
+export function minorMatrix(A: Matrix, row: number, col: number): Matrix {
   return A.filter((_, i) => i !== row).map((r) => r.filter((_, j) => j !== col));
 }
 
