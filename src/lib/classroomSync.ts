@@ -1,12 +1,16 @@
 // Client-side glue for the no-login classroom sync feature. Everything here is best-effort:
 // a student who never enters a class code, or whose sync fails (offline, server down), must
 // keep using every feature exactly as before — localStorage stays the source of truth.
-import type { StudentProgress } from './learningStore';
+import type { StudentProgress, TeacherSettings } from './learningStore';
 import type { SyncedProgress } from './classroomStore';
 
 const STUDENT_ID_KEY = 'matrix_master_student_id_v1';
 const CLASSROOM_LINK_KEY = 'matrix_master_classroom_link_v1';
 const TEACHER_CLASS_CODE_KEY = 'matrix_master_teacher_classcode_v1';
+// Which classroom Presentation mode (live polls) targets — chosen explicitly there and kept
+// SEPARATE from TEACHER_CLASS_CODE_KEY ("last created"), so creating a classroom can never
+// silently repoint an in-use projector at a different room.
+const PRESENTATION_CLASS_CODE_KEY = 'matrix_master_presentation_classcode_v1';
 
 export interface ClassroomLink {
   classCode: string;
@@ -16,6 +20,18 @@ export interface ClassroomLink {
   // successful sync (see syncProgressToClassroom below), so it stays reasonably current without
   // any extra network round-trip beyond what already happens on every progress save.
   note?: string;
+  // The classroom's per-class AI switch (ClassRecord.aiEnabled), cached and refreshed the same
+  // way as note. Missing (links saved before this existed, or before the first sync) = enabled.
+  // UI-only: the server enforces the flag on every AI request regardless of this cache.
+  aiEnabled?: boolean;
+}
+
+/**
+ * Whether AI entry points (AI Tutor, AI practice problems) should be shown: ONLY when both the
+ * teacher's global setting AND the student's current classroom allow it.
+ */
+export function isAiAvailable(settings: Pick<TeacherSettings, 'enableAiTutor'>): boolean {
+  return settings.enableAiTutor && getClassroomLink()?.aiEnabled !== false;
 }
 
 function randomId(): string {
@@ -45,26 +61,26 @@ export function getClassroomLink(): ClassroomLink | null {
   }
 }
 
-export function setClassroomLink(classCode: string, note?: string): void {
+export function setClassroomLink(classCode: string, note?: string, aiEnabled?: boolean): void {
   try {
     localStorage.setItem(
       CLASSROOM_LINK_KEY,
-      JSON.stringify({ classCode, joinedAt: new Date().toISOString(), note })
+      JSON.stringify({ classCode, joinedAt: new Date().toISOString(), note, aiEnabled })
     );
   } catch {
     // Classroom sync is a convenience, not a requirement — ignore storage failures.
   }
 }
 
-// Patches just the note on an already-joined classroom, without touching classCode/joinedAt —
-// called after every successful sync (not just at join time) so a note the teacher sets or
-// changes AFTER a student already joined still reaches that student's sidebar eventually.
-function updateClassroomNote(note: string | undefined): void {
+// Patches just the note/aiEnabled on an already-joined classroom, without touching
+// classCode/joinedAt — called after every successful sync (not just at join time) so a change
+// the teacher makes AFTER a student already joined still reaches that student eventually.
+function updateClassroomStatus(note: string | undefined, aiEnabled: boolean | undefined): void {
   try {
     const raw = localStorage.getItem(CLASSROOM_LINK_KEY);
     if (!raw) return;
     const link = JSON.parse(raw) as ClassroomLink;
-    localStorage.setItem(CLASSROOM_LINK_KEY, JSON.stringify({ ...link, note }));
+    localStorage.setItem(CLASSROOM_LINK_KEY, JSON.stringify({ ...link, note, aiEnabled }));
   } catch {
     // ignore
   }
@@ -100,6 +116,37 @@ export function clearTeacherClassCode(): void {
   } catch {
     // ignore
   }
+}
+
+export function getPresentationClassCode(): string | null {
+  try {
+    return localStorage.getItem(PRESENTATION_CLASS_CODE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setPresentationClassCode(classCode: string | null): void {
+  try {
+    if (classCode) localStorage.setItem(PRESENTATION_CLASS_CODE_KEY, classCode);
+    else localStorage.removeItem(PRESENTATION_CLASS_CODE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * The classroom Presentation mode should target, given the live class list: the remembered
+ * choice if it's still an ACTIVE class; otherwise the only active class if there is exactly one
+ * (unambiguous); otherwise null — the teacher must pick. Never falls back to "last created".
+ */
+export function resolvePresentationClassCode(
+  classes: { classCode: string; active: boolean }[],
+  remembered: string | null
+): string | null {
+  const active = classes.filter((c) => c.active);
+  if (remembered && active.some((c) => c.classCode === remembered)) return remembered;
+  return active.length === 1 ? active[0].classCode : null;
 }
 
 function toSyncedProgress(progress: StudentProgress): SyncedProgress {
@@ -141,7 +188,7 @@ export async function syncProgressToClassroom(progress: StudentProgress): Promis
     }
     if (res.ok) {
       const data = await res.json().catch(() => null);
-      updateClassroomNote(data?.note);
+      updateClassroomStatus(data?.note, data?.aiEnabled);
     }
   } catch {
     // Offline or server unreachable — local progress is unaffected.
@@ -162,7 +209,7 @@ export async function joinClassroom(classCode: string, progress: StudentProgress
     });
     if (res.ok) {
       const data = await res.json().catch(() => null);
-      setClassroomLink(classCode, data?.note);
+      setClassroomLink(classCode, data?.note, data?.aiEnabled);
       return true;
     }
     return false;

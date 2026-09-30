@@ -32,6 +32,21 @@ export interface ClassRecord {
   active: boolean;
   note?: string; // teacher-set label (e.g. "ม.5/8") to tell classes apart at a glance
   students: Record<string, StudentRecord>; // keyed by studentId
+  // Per-classroom switches (TeacherSettingsPage). Classes stored before these existed have no
+  // such field, so ALWAYS read them via isClassAiEnabled / isClassIncludedInResearch, which treat
+  // a missing value as true — existing classrooms keep behaving exactly as before.
+  aiEnabled: boolean; // AI Tutor + AI practice problems (composes with TeacherSettings.enableAiTutor)
+  includeInResearch: boolean; // counted in every research aggregate (E1/E2/E.I., survey, export)
+}
+
+export type ClassFlags = Pick<ClassRecord, 'aiEnabled' | 'includeInResearch'>;
+
+export function isClassAiEnabled(cls: Partial<ClassFlags>): boolean {
+  return cls.aiEnabled !== false;
+}
+
+export function isClassIncludedInResearch(cls: Partial<ClassFlags>): boolean {
+  return cls.includeInResearch !== false;
 }
 
 export interface ClassroomDB {
@@ -66,7 +81,9 @@ export function createClass(db: ClassroomDB, note?: string): { db: ClassroomDB; 
     createdAt: new Date().toISOString(),
     active: true,
     note: trimmedNote || undefined,
-    students: {}
+    students: {},
+    aiEnabled: true,
+    includeInResearch: true
   };
   return {
     db: { classes: { ...db.classes, [classCode]: record } },
@@ -157,6 +174,22 @@ export function reopenClass(db: ClassroomDB, classCode: string): ClassMutationRe
   return setActive(db, classCode, true);
 }
 
+// A genuine, permanent delete — the class AND every roster entry in it — unlike closeClass, which
+// only marks it inactive (and can be undone). Used to clean up unwanted/test classrooms.
+export function deleteClass(db: ClassroomDB, classCode: string): ClassMutationResult {
+  if (!db.classes[classCode]) return { ok: false, error: 'class_not_found' };
+  const remainingClasses = { ...db.classes };
+  delete remainingClasses[classCode];
+  return { ok: true, db: { classes: remainingClasses } };
+}
+
+export function setClassFlags(db: ClassroomDB, classCode: string, flags: Partial<ClassFlags>): ClassMutationResult {
+  const cls = db.classes[classCode];
+  if (!cls) return { ok: false, error: 'class_not_found' };
+  const updatedClass: ClassRecord = { ...cls, ...flags };
+  return { ok: true, db: { classes: { ...db.classes, [classCode]: updatedClass } } };
+}
+
 export function setClassNote(db: ClassroomDB, classCode: string, note: string): ClassMutationResult {
   const cls = db.classes[classCode];
   if (!cls) return { ok: false, error: 'class_not_found' };
@@ -186,6 +219,8 @@ export interface ClassSummary {
   active: boolean;
   note?: string;
   studentCount: number;
+  aiEnabled: boolean;
+  includeInResearch: boolean;
 }
 
 export function listClasses(db: ClassroomDB): ClassSummary[] {
@@ -195,7 +230,9 @@ export function listClasses(db: ClassroomDB): ClassSummary[] {
       createdAt: cls.createdAt,
       active: cls.active,
       note: cls.note,
-      studentCount: Object.keys(cls.students).length
+      studentCount: Object.keys(cls.students).length,
+      aiEnabled: isClassAiEnabled(cls),
+      includeInResearch: isClassIncludedInResearch(cls)
     }))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }

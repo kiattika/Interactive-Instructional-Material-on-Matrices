@@ -2,12 +2,15 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Award, Target, Zap, BookOpen, Compass, ArrowRight, Sparkles, CheckCircle2, GraduationCap, Flame } from 'lucide-react';
 import { loadStudentProgress, loadTeacherSettings, CURRICULUM_LESSONS } from '../lib/learningStore';
+import { isAiAvailable } from '../lib/classroomSync';
 import { computeLearningStreak, getNextBadgeNudge } from '../lib/motivation';
 import { ALL_BADGES } from '../components/BadgesAndCertificate';
 
 export default function Dashboard() {
   const [progress] = useState(loadStudentProgress);
   const [settings] = useState(loadTeacherSettings);
+  // Global teacher setting AND the joined classroom's own AI switch.
+  const aiAvailable = isAiAvailable(settings);
   const completedCount = progress.completedLessons.length;
   const progressPercent = Math.round((completedCount / CURRICULUM_LESSONS.length) * 100);
 
@@ -159,7 +162,7 @@ export default function Dashboard() {
 
         {/* Curriculum Progress List — takes the full remaining width when the AI tutor teaser
             (below) is hidden, since there's nothing left to share the row with. */}
-        <div className={`${settings.enableAiTutor ? 'md:col-span-7' : 'md:col-span-12'} bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col justify-between`}>
+        <div className={`${aiAvailable ? 'md:col-span-7' : 'md:col-span-12'} bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col justify-between`}>
           <div>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-bold text-slate-800">บทเรียนหลักสูตรปัจจุบัน</h3>
@@ -209,9 +212,9 @@ export default function Dashboard() {
         </div>
 
         {/* Gemini Math Tutor Container — a teaser for the real AI tutor in MatrixLab.tsx, so it
-            follows the same enableAiTutor gate: hidden entirely, not just cosmetically, when
-            the teacher has turned the AI tutor off. */}
-        {settings.enableAiTutor && (
+            follows the same gate (isAiAvailable): hidden entirely, not just cosmetically, when
+            the teacher has turned the AI tutor off globally or for this classroom. */}
+        {aiAvailable && (
           <div className="md:col-span-5 bg-gradient-to-br from-indigo-900 via-indigo-800 to-slate-900 rounded-2xl shadow-lg p-6 flex flex-col justify-between relative overflow-hidden text-white min-h-[360px]">
             <div className="relative z-10 flex flex-col h-full space-y-4">
               <div className="flex items-center gap-2">

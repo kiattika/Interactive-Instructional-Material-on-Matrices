@@ -10,17 +10,20 @@ export async function createLivePoll(
   question: string,
   options: string[],
   correctAnswer: string
-): Promise<{ pollId: string } | null> {
+): Promise<{ pollId: string } | { error: string }> {
   try {
     const res = await fetch('/api/live-poll', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ classCode, question, options, correctAnswer })
     });
-    if (!res.ok) return null;
-    return await res.json();
+    const data = await res.json().catch(() => null);
+    // Surface the server's reason (e.g. the class was closed/deleted) — a silent failure here
+    // is exactly what used to make "Start Live Poll" look intermittently broken.
+    if (!res.ok || !data?.pollId) return { error: data?.error || 'ไม่สามารถเริ่มคำถามสดได้ในขณะนี้ ลองใหม่อีกครั้ง' };
+    return { pollId: data.pollId };
   } catch {
-    return null;
+    return { error: 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้ ลองใหม่อีกครั้ง' };
   }
 }
 

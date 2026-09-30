@@ -1,4 +1,4 @@
-import { computeE1, computeE2, computeEffectivenessIndex, computeEfficiencyStats, EfficiencyInput } from '../lib/efficiencyStats';
+import { computeE1, computeE2, computeEffectivenessIndex, computeEfficiencyStats, computeResearchEfficiencyStats, EfficiencyInput } from '../lib/efficiencyStats';
 import { defaultStudentProgress, StudentProgress } from '../lib/learningStore';
 import { resolveCheckAttempt, lessonCheckScore } from '../lib/checkAttempts';
 
@@ -88,6 +88,21 @@ assert(retried.checkQuestionOutcomes[k(2)] === 0, 'a practice retry after the an
 const legacy = { ...base(), checkQuestionXpAwarded: ['lesson4-check0'] };
 assert(!('lesson4-check0' in resolveCheckAttempt(legacy, 'lesson4-check0', true, 0, true).progress.checkQuestionOutcomes),
   'a question already settled before outcomes were tracked gets no (possibly after-the-fact) outcome');
+
+// includeInResearch: an excluded classroom contributes nothing to any figure.
+const inA = [students[0], students[1]];
+const outB = [students[3]];
+const mixed = computeResearchEfficiencyStats([
+  { includeInResearch: true, students: inA },
+  { includeInResearch: false, students: outB },
+  { students: [students[2]] } // flag missing (legacy) = included
+]);
+assert(JSON.stringify(mixed) === JSON.stringify(computeEfficiencyStats([...inA, students[2]])),
+  "aggregate over classrooms equals computeEfficiencyStats over the included classrooms' students only");
+assert(mixed.e2.n === 2 && mixed.totalStudents === 3, "excluded classroom's Post-Test completer is not counted in E2");
+const onlyExcluded = computeResearchEfficiencyStats([{ includeInResearch: false, students: outB }]);
+assert(onlyExcluded.totalStudents === 0 && onlyExcluded.e1.value === null && onlyExcluded.e2.value === null && onlyExcluded.ei.value === null,
+  "an excluded classroom's own figure has no data (null), never its students' scores");
 
 console.log('='.repeat(50));
 console.log('  ALL EFFICIENCY STATS QA TESTS PASSED!');

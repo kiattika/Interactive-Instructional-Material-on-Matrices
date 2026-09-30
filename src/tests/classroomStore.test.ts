@@ -12,9 +12,15 @@ import {
   setClassNote,
   removeStudent,
   findStudentsByDisplayName,
+  setClassFlags,
+  deleteClass,
+  isClassAiEnabled,
+  isClassIncludedInResearch,
+  ClassFlags,
   SyncedProgress,
   StudentRecord
 } from '../lib/classroomStore';
+import { resolvePresentationClassCode } from '../lib/classroomSync';
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -279,6 +285,65 @@ assert(
 
 const blankNameMatch = findStudentsByDisplayName(recoveryRoster, '   ');
 assert(blankNameMatch.length === 0, 'a blank name must never match anything');
+
+// --- Per-classroom flags: aiEnabled / includeInResearch ---
+const { db: flagDb, classCode: flagCode } = createClass(createEmptyDB());
+assert(flagDb.classes[flagCode].aiEnabled === true && flagDb.classes[flagCode].includeInResearch === true,
+  'a new class has AI enabled and is included in research by default');
+const legacyClass: Partial<ClassFlags> & Record<string, unknown> = { classCode: 'LEGACY', createdAt: '2026-01-01T00:00:00.000Z', active: true, students: {} };
+assert(isClassAiEnabled(legacyClass) && isClassIncludedInResearch(legacyClass),
+  'a class stored before the flags existed (fields missing) reads as AI-enabled and included');
+const legacyListed = listClasses({ classes: { LEGACY: legacyClass as any } })[0];
+assert(legacyListed.aiEnabled === true && legacyListed.includeInResearch === true, 'listClasses reports missing flags as true');
+const flagged = setClassFlags(flagDb, flagCode, { aiEnabled: false });
+assert(flagged.ok, 'setClassFlags succeeds on an existing class');
+if (flagged.ok) {
+  const cls = flagged.db.classes[flagCode];
+  assert(!isClassAiEnabled(cls) && isClassIncludedInResearch(cls), 'setClassFlags changes only the flag it was given');
+  const both = setClassFlags(flagged.db, flagCode, { includeInResearch: false });
+  assert(both.ok && listClasses(both.db)[0].includeInResearch === false && listClasses(both.db)[0].aiEnabled === false,
+    'listClasses reflects both flags once turned off');
+  assert(isClassActive(flagged.db, flagCode), 'turning AI off does not close the class');
+}
+assert(!setClassFlags(flagDb, 'NOPE00', { aiEnabled: false }).ok, 'setClassFlags on a missing class is class_not_found');
+
+// --- deleteClass: permanent removal (vs closeClass, which only marks it inactive) ---
+const { db: delDb1, classCode: keepCode } = createClass(createEmptyDB(), 'keep');
+const { db: delDb2, classCode: delCode } = createClass(delDb1, 'delete me');
+const withStudents = upsertStudentProgress(delDb2, delCode, 'stuX', 'ทดสอบ', sampleProgress);
+assert(withStudents.ok, 'setup: a student synced into the class to be deleted');
+if (withStudents.ok) {
+  const deleted = deleteClass(withStudents.db, delCode);
+  assert(deleted.ok, 'deleteClass succeeds on an existing class (even one with students)');
+  if (deleted.ok) {
+    assert(!classExists(deleted.db, delCode), 'the deleted class no longer exists at all (not merely inactive)');
+    assert(getRoster(deleted.db, delCode) === null, 'its roster is gone with it (getRoster → null, not [])');
+    assert(listClasses(deleted.db).length === 1 && listClasses(deleted.db)[0].classCode === keepCode,
+      'other classes are untouched and the deleted one is gone from listClasses');
+    assert(classExists(withStudents.db, delCode), 'deleteClass does not mutate the db it was given');
+    assert(!upsertStudentProgress(deleted.db, delCode, 'stuX', 'ทดสอบ', sampleProgress).ok,
+      'syncing into a deleted class is class_not_found');
+    const again = deleteClass(deleted.db, delCode);
+    assert(!again.ok && (again as { ok: false; error: string }).error === 'class_not_found',
+      'deleting an already-deleted class is class_not_found');
+  }
+}
+
+// --- Presentation mode's live-poll target (root fix: never "last created") ---
+const rooms = [
+  { classCode: 'NEWEST', active: true }, // most recently created — must NOT win by default
+  { classCode: 'PERIOD1', active: true },
+  { classCode: 'CLOSED', active: false }
+];
+assert(resolvePresentationClassCode(rooms, 'PERIOD1') === 'PERIOD1',
+  'the remembered presentation classroom is kept even after a newer classroom was created');
+assert(resolvePresentationClassCode(rooms, null) === null,
+  'with several active classrooms and nothing remembered, nothing is picked — the teacher must choose');
+assert(resolvePresentationClassCode(rooms, 'CLOSED') === null, 'a remembered classroom that was closed is not used');
+assert(resolvePresentationClassCode(rooms, 'GONE00') === null, 'a remembered classroom that was deleted is not used');
+assert(resolvePresentationClassCode([{ classCode: 'ONLY', active: true }, { classCode: 'CLOSED', active: false }], null) === 'ONLY',
+  'exactly one active classroom is picked automatically (unambiguous)');
+assert(resolvePresentationClassCode([], 'PERIOD1') === null, 'no classrooms → no target');
 
 console.log('='.repeat(50));
 console.log('  ALL CLASSROOM SYNC TESTS PASSED!');

@@ -3,7 +3,7 @@
 // src/tests/efficiencyStats.test.ts. Values are returned UNROUNDED; rounding happens only when
 // displaying. Each figure carries its own n, because the three are computed over different
 // subsets of students and must never be presented as sharing one denominator.
-import type { SyncedProgress } from './classroomStore';
+import { isClassIncludedInResearch, ClassFlags, SyncedProgress } from './classroomStore';
 
 export type EfficiencyInput = Pick<SyncedProgress, 'preTestCompleted' | 'preTestScore' | 'postTestCompleted' | 'postTestScore'> & {
   // Optional: roster records synced before this field existed don't have it.
@@ -71,4 +71,22 @@ export function computeEfficiencyStats(students: EfficiencyInput[]): EfficiencyS
     ei: computeEffectivenessIndex(students),
     totalStudents: students.length
   };
+}
+
+export interface ClassroomEfficiencyInput extends Partial<Pick<ClassFlags, 'includeInResearch'>> {
+  students: EfficiencyInput[];
+}
+
+/** Every student of every classroom that counts toward the research (includeInResearch). */
+export function researchStudents(classrooms: ClassroomEfficiencyInput[]): EfficiencyInput[] {
+  return classrooms.filter(isClassIncludedInResearch).flatMap((c) => c.students);
+}
+
+/**
+ * The entry point for any research-facing figure: E1/E2/E.I. over the given classrooms with every
+ * includeInResearch=false classroom skipped entirely (a missing flag counts as included). Pass
+ * one classroom for a per-classroom figure, several for an aggregate.
+ */
+export function computeResearchEfficiencyStats(classrooms: ClassroomEfficiencyInput[]): EfficiencyStats {
+  return computeEfficiencyStats(researchStudents(classrooms));
 }

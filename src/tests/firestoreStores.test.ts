@@ -172,6 +172,32 @@ async function main() {
       'a blank note removes the field entirely, not just sets it to an empty string'
     );
 
+    // 1b. Per-classroom flags (aiEnabled / includeInResearch).
+    assert((await classroom.getAiAccess(classCode)) === 'ok', 'a new class allows AI');
+    assert(syncRes.ok === true && (syncRes as { aiEnabled: boolean }).aiEnabled === true, 'sync reports aiEnabled so the client can cache it');
+    assert((await classroom.setClassFlags(classCode, { aiEnabled: false })).ok === true, 'setClassFlags succeeds');
+    assert((await classroom.getAiAccess(classCode)) === 'ai_disabled', 'AI access is refused once the teacher turns AI off for the class');
+    assert(await classroom.isClassUsable(classCode), 'turning AI off does not make the class unusable for syncing');
+    const flagSync = await classroom.syncStudentProgress(classCode, 'stu1', 'สมชาย', { ...blankProgress, xp: 10, lessonCheckScores: { 3: 70 } });
+    assert(flagSync.ok === true && (flagSync as { aiEnabled: boolean }).aiEnabled === false, 'sync reports the turned-off AI flag');
+    assert((await classroom.setClassFlags(classCode, { includeInResearch: false })).ok === true, 'setClassFlags (research) succeeds');
+    const flagged = (await classroom.listClasses()).find((c) => c.classCode === classCode);
+    assert(!!flagged && flagged.aiEnabled === false && flagged.includeInResearch === false, 'listClasses reflects both flags');
+    assert(!(await classroom.listResearchClassCodes()).has(classCode), 'an excluded class is not among the research classrooms');
+    await classroom.setClassFlags(classCode, { aiEnabled: true, includeInResearch: true });
+    assert((await classroom.getAiAccess(classCode)) === 'ok' && (await classroom.listResearchClassCodes()).has(classCode),
+      'both flags can be turned back on');
+    assert((await classroom.setClassFlags('NOPE99', { aiEnabled: false })).ok === false, 'setClassFlags on a missing class is class_not_found');
+    assert((await classroom.getAiAccess('NOPE99')) === 'class_unusable', 'AI access to a nonexistent class is class_unusable');
+
+    // A class document written before the flags existed has neither field: it must behave as enabled + included.
+    const legacyDb = (await import('../../server/firestoreClient')).getFirestore();
+    await legacyDb.collection('classes').doc('LEGAC1').set({ classCode: 'LEGAC1', createdAt: '2026-01-01T00:00:00.000Z', active: true });
+    const legacy = (await classroom.listClasses()).find((c) => c.classCode === 'LEGAC1');
+    assert(!!legacy && legacy.aiEnabled === true && legacy.includeInResearch === true, 'a legacy class doc (no flag fields) lists as AI-enabled and included');
+    assert((await classroom.getAiAccess('LEGAC1')) === 'ok', 'a legacy class doc still allows AI');
+    await legacyDb.collection('classes').doc('LEGAC1').delete();
+
     assert((await classroom.removeStudent(classCode, 'stu1')).ok === true, 'removeStudent succeeds');
     const rosterAfterRemove = await classroom.fetchRoster(classCode);
     assert(rosterAfterRemove !== null && rosterAfterRemove.length === 0, 'removed student is gone from the roster');
@@ -179,6 +205,23 @@ async function main() {
       (await classroom.removeStudent(classCode, 'stu1')).ok === true,
       'removing an already-absent student is an idempotent success, not an error'
     );
+
+    // 1c. Permanent delete: class doc AND its whole students/ subcollection are gone.
+    const { classCode: doomed } = await classroom.createClass('ห้องทดสอบที่จะลบ');
+    await classroom.syncStudentProgress(doomed, 'del1', 'ก', blankProgress);
+    await classroom.syncStudentProgress(doomed, 'del2', 'ข', blankProgress);
+    assert((await classroom.fetchRoster(doomed))?.length === 2, 'the class to delete has 2 synced students first');
+    assert((await classroom.deleteClass(doomed)).ok === true, 'deleteClass succeeds');
+    const deleteDb = (await import('../../server/firestoreClient')).getFirestore();
+    assert(!(await deleteDb.collection('classes').doc(doomed).get()).exists, 'the class document itself is deleted');
+    const orphanStudents = await deleteDb.collection('classes').doc(doomed).collection('students').get();
+    assert(orphanStudents.empty, 'the students subcollection is deleted too (no orphaned roster docs left behind)');
+    assert((await classroom.fetchRoster(doomed)) === null, 'fetchRoster on a deleted class is null (404), not an empty roster');
+    assert(!(await classroom.listClasses()).some((c) => c.classCode === doomed), 'a deleted class no longer appears in listClasses');
+    assert(!(await classroom.isClassUsable(doomed)), 'a deleted class is not usable');
+    assert((await classroom.syncStudentProgress(doomed, 'del1', 'ก', blankProgress)).ok === false,
+      'a student still holding the deleted code cannot sync into it (the client then clears its link)');
+    assert((await classroom.deleteClass(doomed)).ok === false, 'deleting an already-deleted class is class_not_found');
 
     // 2. Live poll lifecycle: create, answer, results (no answer-key leak), close with correct
     // tallying, reject-after-close, pending-award pull-and-acknowledge handshake.

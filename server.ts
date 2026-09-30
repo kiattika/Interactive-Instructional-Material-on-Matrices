@@ -11,10 +11,14 @@ import {
   syncStudentProgress,
   fetchRoster,
   isClassUsable,
+  getAiAccess,
   closeClass,
   reopenClass,
   listClasses,
   setClassNote,
+  setClassFlags,
+  listResearchClassCodes,
+  deleteClass,
   removeStudent
 } from './server/classroomFileStore';
 import {
@@ -55,7 +59,8 @@ const aiRateLimiter = rateLimit({
 
 // Shared guard for /api/ai-tutor and /api/ai-practice-problem: both must be scoped to a real,
 // active classroom (see #3 in the Phase 2 access-control brief) so an unauthenticated visitor
-// can never rack up Gemini usage. Returns the friendly Thai 403 payload to send when rejected,
+// can never rack up Gemini usage — and one whose teacher hasn't switched AI off for that
+// classroom (ClassRecord.aiEnabled, set in TeacherSettingsPage). Returns the friendly Thai 403 payload to send when rejected,
 // or null when the request may proceed.
 async function checkClassroomAuthorized(body: any): Promise<{ status: number; message: string } | null> {
   const classCode = typeof body?.classCode === 'string' ? body.classCode.toUpperCase() : '';
@@ -63,9 +68,12 @@ async function checkClassroomAuthorized(body: any): Promise<{ status: number; me
   if (!classCode || !studentId) {
     return { status: 403, message: 'ต้องเข้าร่วมห้องเรียนด้วยรหัสห้องก่อนจึงจะใช้ AI ได้ครับ' };
   }
-  const usable = await isClassUsable(classCode);
-  if (!usable) {
+  const access = await getAiAccess(classCode);
+  if (access === 'class_unusable') {
     return { status: 403, message: 'ไม่พบห้องเรียนนี้ หรือห้องเรียนนี้ถูกปิดใช้งานแล้ว โปรดเข้าร่วมห้องเรียนใหม่อีกครั้งครับ' };
+  }
+  if (access === 'ai_disabled') {
+    return { status: 403, message: 'คุณครูปิดการใช้งานผู้ช่วย AI สำหรับห้องเรียนนี้ไว้ครับ ลองทบทวนจากบทเรียนและคำใบ้ในแอปได้เลย' };
   }
   return null;
 }
@@ -242,6 +250,28 @@ ${SOCRATIC_GROUND_RULES}
     }
   });
 
+  // Per-classroom switches (TeacherSettingsPage): AI on/off and include-in-research. Only
+  // boolean fields actually present in the body are written.
+  app.patch('/api/classroom/:code/flags', async (req, res) => {
+    try {
+      const classCode = req.params.code.toUpperCase();
+      const flags: { aiEnabled?: boolean; includeInResearch?: boolean } = {};
+      if (typeof req.body?.aiEnabled === 'boolean') flags.aiEnabled = req.body.aiEnabled;
+      if (typeof req.body?.includeInResearch === 'boolean') flags.includeInResearch = req.body.includeInResearch;
+      if (Object.keys(flags).length === 0) {
+        return res.status(400).json({ error: 'ข้อมูลไม่ครบถ้วน' });
+      }
+      const result = await setClassFlags(classCode, flags);
+      if (!result.ok) {
+        return res.status(404).json({ error: 'ไม่พบรหัสห้องเรียนนี้' });
+      }
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('Failed to update classroom flags:', error);
+      return res.status(500).json({ error: 'ไม่สามารถบันทึกการตั้งค่าห้องเรียนได้ในขณะนี้' });
+    }
+  });
+
   // Lets the teacher see every class this server knows about, not just whichever one their
   // own browser's localStorage happens to remember — see TeacherSettingsPage.tsx.
   app.get('/api/classroom', async (_req, res) => {
@@ -270,9 +300,9 @@ ${SOCRATIC_GROUND_RULES}
       if (!result.ok) {
         return res.status(404).json({ error: 'ไม่พบรหัสห้องเรียนนี้' });
       }
-      // note is included so the client can cache it (see classroomSync.ts's ClassroomLink.note)
-      // without a dedicated fetch — this call already reads the class doc either way.
-      return res.json({ ok: true, note: result.note });
+      // note/aiEnabled are included so the client can cache them (see classroomSync.ts's
+      // ClassroomLink) without a dedicated fetch — this call already reads the class doc anyway.
+      return res.json({ ok: true, note: result.note, aiEnabled: result.aiEnabled });
     } catch (error) {
       console.error('Failed to sync classroom progress:', error);
       return res.status(500).json({ error: 'ไม่สามารถบันทึกความก้าวหน้าได้ในขณะนี้' });
@@ -328,6 +358,22 @@ ${SOCRATIC_GROUND_RULES}
     }
   });
 
+  // Permanent delete: the class and its whole roster (see classroomFileStore.ts's deleteClass).
+  // TeacherSettingsPage confirms with the teacher first, naming the student count.
+  app.delete('/api/classroom/:code', async (req, res) => {
+    try {
+      const classCode = req.params.code.toUpperCase();
+      const result = await deleteClass(classCode);
+      if (!result.ok) {
+        return res.status(404).json({ error: 'ไม่พบรหัสห้องเรียนนี้' });
+      }
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('Failed to delete classroom:', error);
+      return res.status(500).json({ error: 'ไม่สามารถลบห้องเรียนได้ในขณะนี้' });
+    }
+  });
+
   app.post('/api/classroom/:code/reopen', async (req, res) => {
     try {
       const classCode = req.params.code.toUpperCase();
@@ -373,6 +419,11 @@ ${SOCRATIC_GROUND_RULES}
       };
       if (!classCode || !question || !Array.isArray(options) || options.length < 2 || !correctAnswer) {
         return res.status(400).json({ error: 'ข้อมูลคำถามไม่ครบถ้วน' });
+      }
+      // A poll for a deleted/closed class would "start" fine but no joined student could ever
+      // earn its XP (pending awards are scoped by classCode) — refuse it visibly instead.
+      if (!(await isClassUsable(classCode.toUpperCase()))) {
+        return res.status(404).json({ error: 'ไม่พบห้องเรียนนี้ หรือห้องเรียนถูกปิดแล้ว เลือกห้องเรียนใหม่ก่อนเริ่มคำถามสด' });
       }
       const { pollId } = await createPoll(classCode.toUpperCase(), question, options, correctAnswer);
       return res.json({ pollId });
@@ -499,13 +550,19 @@ ${SOCRATIC_GROUND_RULES}
   });
 
   // Aggregates only (n, per-question mean/SD, comment text) — never raw responses or timestamps.
-  // ?classCode=XXXX for one classroom; omit it for all classrooms combined.
+  // ?classCode=XXXX for one classroom; omit it for all classrooms combined — which leaves out
+  // deleted classrooms and ones the teacher marked includeInResearch=false (a single excluded classroom is still
+  // readable by its code; TeacherAnalytics simply doesn't show it as a research figure).
   app.get('/api/survey/results', async (req, res) => {
     try {
       const classCode = typeof req.query.classCode === 'string' && req.query.classCode.trim()
         ? req.query.classCode.trim().toUpperCase()
         : undefined;
-      const responses = await fetchSurveyResponses(classCode);
+      let responses = await fetchSurveyResponses(classCode);
+      if (!classCode) {
+        const researchCodes = await listResearchClassCodes();
+        responses = responses.filter((r) => researchCodes.has(r.classCode));
+      }
       return res.json(aggregateSurveyResponses(responses));
     } catch (error) {
       console.error('Failed to fetch survey results:', error);
