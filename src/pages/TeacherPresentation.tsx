@@ -11,7 +11,8 @@ import {
   CircleStop,
   Trophy,
   Maximize,
-  Minimize
+  Minimize,
+  Users
 } from 'lucide-react';
 import { toDataURL } from 'qrcode';
 import { LinearSystem, SystemDimension, SolutionType } from '../types';
@@ -33,7 +34,8 @@ import {
   RenderTextWithMath,
   formatLatexFraction
 } from '../components/math/MathComponents';
-import { getTeacherClassCode } from '../lib/classroomSync';
+import { getPresentationClassCode, setPresentationClassCode, resolvePresentationClassCode } from '../lib/classroomSync';
+import type { ClassSummary } from '../lib/classroomStore';
 import { usePresentationChrome } from '../components/layout/PresentationChromeContext';
 import {
   createLivePoll,
@@ -374,9 +376,40 @@ export default function TeacherPresentation() {
   const [questionRevealed, setQuestionRevealed] = useState<boolean>(false);
 
   // Live poll state — wraps the existing "Ask the Class" question with a real, phone-answerable
-  // quiz. classCode comes from this browser's last-created class (same source TeacherAnalytics
-  // and TeacherSettingsPage already use); no live poll can start without one.
-  const [teacherClassCode] = useState<string | null>(getTeacherClassCode);
+  // quiz. The target classroom is chosen EXPLICITLY in the header (fetched from GET
+  // /api/classroom, like TeacherAnalytics) and remembered separately from "last created" — it
+  // used to be read once from getTeacherClassCode(), so creating any other classroom silently
+  // repointed every poll at the wrong room. No live poll can start without a selection.
+  const [classes, setClasses] = useState<ClassSummary[] | null>(null);
+  const [classesError, setClassesError] = useState<string | null>(null);
+  const [teacherClassCode, setTeacherClassCodeState] = useState<string | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
+
+  async function refreshClasses() {
+    setClassesError(null);
+    try {
+      const res = await fetch('/api/classroom');
+      if (!res.ok) throw new Error(String(res.status));
+      const list = ((await res.json()).classes as ClassSummary[]) || [];
+      setClasses(list);
+      setTeacherClassCodeState((prev) => resolvePresentationClassCode(list, prev ?? getPresentationClassCode()));
+    } catch {
+      setClassesError('ไม่สามารถดึงรายชื่อห้องเรียนได้');
+    }
+  }
+
+  useEffect(() => {
+    refreshClasses();
+  }, []);
+
+  function selectPresentationClass(code: string | null) {
+    setTeacherClassCodeState(code);
+    setPresentationClassCode(code);
+    setPollError(null);
+  }
+
+  const activeClasses = classes ? classes.filter((c) => c.active) : [];
+  const selectedClass = activeClasses.find((c) => c.classCode === teacherClassCode) || null;
   const [livePollId, setLivePollId] = useState<string | null>(null);
   const [pollStarting, setPollStarting] = useState(false);
   const [pollClosing, setPollClosing] = useState(false);
@@ -429,9 +462,16 @@ export default function TeacherPresentation() {
     if (!teacherClassCode || pollStarting) return;
     setPollStarting(true);
     setPollCloseSummary(null);
+    setPollError(null);
     const result = await createLivePoll(teacherClassCode, qObj.question, qObj.options, qObj.correctAnswer);
     setPollStarting(false);
-    if (result) setLivePollId(result.pollId);
+    if ('pollId' in result) {
+      setLivePollId(result.pollId);
+    } else {
+      setPollError(result.error);
+      // The class may have been closed/deleted since this page loaded — re-sync the picker.
+      refreshClasses();
+    }
   }
 
   async function handleCloseLivePoll() {
@@ -601,6 +641,37 @@ export default function TeacherPresentation() {
               <span className="text-xs bg-indigo-900/60 text-indigo-300 border border-indigo-700 px-2.5 py-0.5 rounded-full font-bold">
                 Projector View
               </span>
+              {/* The classroom every live poll targets — always visible (projector mode too) so
+                  there's never doubt which room students must have joined. Locked mid-poll. */}
+              <label className="flex items-center gap-1.5 text-xs bg-rose-950/50 text-rose-200 border border-rose-800 pl-2.5 pr-1 py-0.5 rounded-full font-bold">
+                <Users className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="sr-only">ห้องเรียนสำหรับคำถามสด</span>
+                {classes === null ? (
+                  <span className="pr-1.5">{classesError || 'กำลังโหลดห้องเรียน...'}</span>
+                ) : activeClasses.length === 0 ? (
+                  <span className="pr-1.5">ยังไม่มีห้องเรียนที่เปิดใช้งาน — สร้างที่หน้าตั้งค่า</span>
+                ) : (
+                  <select
+                    value={teacherClassCode ?? ''}
+                    onChange={(e) => selectPresentationClass(e.target.value || null)}
+                    disabled={!!livePollId}
+                    title={livePollId ? 'ปิดคำถามสดที่กำลังเปิดอยู่ก่อนเปลี่ยนห้องเรียน' : 'ห้องเรียนที่คำถามสด (Live Poll) จะส่งไป'}
+                    className="bg-transparent text-rose-100 font-bold focus:outline-none cursor-pointer disabled:cursor-not-allowed max-w-[16rem] truncate"
+                  >
+                    {!selectedClass && (
+                      <option value="" className="bg-slate-900">
+                        — เลือกห้องเรียนสำหรับคำถามสด —
+                      </option>
+                    )}
+                    {activeClasses.map((c) => (
+                      <option key={c.classCode} value={c.classCode} className="bg-slate-900">
+                        ห้อง {c.classCode}
+                        {c.note ? ` — ${c.note}` : ''} ({c.studentCount} คน)
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </label>
               <button
                 onClick={isProjectorMode ? exitProjectorMode : enterProjectorMode}
                 className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors"
@@ -1241,8 +1312,12 @@ export default function TeacherPresentation() {
                   {!livePollId && (
                     <button
                       onClick={() => handleStartLivePoll(qObj)}
-                      disabled={pollStarting || !teacherClassCode}
-                      title={teacherClassCode ? undefined : 'ต้องสร้างรหัสห้องเรียนที่หน้าตั้งค่าก่อน'}
+                      disabled={pollStarting || !selectedClass}
+                      title={
+                        selectedClass
+                          ? `ส่งคำถามไปยังห้อง ${selectedClass.classCode}`
+                          : 'เลือกห้องเรียนที่มุมบนของหน้าจอก่อน (ข้างป้าย Projector View)'
+                      }
                       className="px-3 py-1 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5"
                     >
                       {pollStarting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Radio className="w-3.5 h-3.5" />}
@@ -1257,6 +1332,12 @@ export default function TeacherPresentation() {
                   </button>
                 </div>
               </div>
+              {!livePollId && !selectedClass && classes !== null && (
+                <p className="text-xs lg:text-sm font-bold text-amber-300">
+                  ยังไม่ได้เลือกห้องเรียนสำหรับคำถามสด — เลือกได้ที่มุมบนของหน้าจอ
+                </p>
+              )}
+              {pollError && <p className="text-xs lg:text-sm font-bold text-rose-300">{pollError}</p>}
 
               <p className="text-lg lg:text-2xl 2xl:text-3xl font-bold text-white">
                 "{qObj.question}"

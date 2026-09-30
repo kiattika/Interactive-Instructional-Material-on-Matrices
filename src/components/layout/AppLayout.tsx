@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { loadStudentProgress, loadTeacherSettings } from '../../lib/learningStore';
-import { getClassroomLink } from '../../lib/classroomSync';
+import { getClassroomLink, isAiAvailable } from '../../lib/classroomSync';
 import { hasVerifiedTeacherPin } from '../../lib/teacherAuth';
 import { ClassroomJoinModal } from '../ClassroomJoinModal';
 import { TeacherPinModal } from '../TeacherPinModal';
@@ -335,7 +335,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
               </button>
             )}
 
-            {settings.enableAiTutor && (
+            {isAiAvailable(settings) && (
               <div className="p-3.5 bg-gradient-to-br from-indigo-900 to-slate-900 rounded-xl text-white space-y-2 flex-shrink-0">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
                   <Sparkles className="w-3.5 h-3.5" /> Matrix Assistant

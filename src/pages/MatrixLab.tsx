@@ -30,6 +30,7 @@ import { InversePractice } from '../components/lab/InversePractice';
 import { CramerPractice } from '../components/lab/CramerPractice';
 import { withActivity, withMethodUsed, withEarnedBadges, VERSATILE_SOLVER_BADGE } from '../lib/motivation';
 import { GeminiTutor } from '../components/GeminiTutor';
+import { isAiAvailable } from '../lib/classroomSync';
 import { GaussStepDisplay } from '../components/GaussStepDisplay';
 import {
   SystemDisplay,
@@ -220,6 +221,8 @@ export default function MatrixLab() {
 
   const [progress, setProgress] = useState(loadStudentProgress);
   const [settings] = useState(loadTeacherSettings);
+  // Global teacher setting AND the joined classroom's own AI switch.
+  const aiAvailable = isAiAvailable(settings);
   // True only for the visit where the Gauss walkthrough XP was actually just granted — keeps
   // the completion banner from claiming "+15 XP!" again on every later visit to an
   // already-completed walkthrough.
@@ -573,7 +576,7 @@ export default function MatrixLab() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:flex-grow lg:overflow-hidden">
         {/* Left Column: Input Engine & Solver Tabs — takes the full width when the AI tutor is
             disabled, since there's no right column to share it with. */}
-        <div className={`${settings.enableAiTutor ? 'lg:col-span-8' : 'lg:col-span-12'} flex flex-col gap-4 lg:overflow-y-auto lg:pr-1`}>
+        <div className={`${aiAvailable ? 'lg:col-span-8' : 'lg:col-span-12'} flex flex-col gap-4 lg:overflow-y-auto lg:pr-1`}>
           {/* Matrix Input & Representation Bento Card */}
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
@@ -1305,8 +1308,8 @@ export default function MatrixLab() {
         </div>
 
         {/* Right Column (4 cols): Gemini AI Math Tutor — entry point hidden entirely (not just
-            disabled) when the teacher has turned off the AI tutor. */}
-        {settings.enableAiTutor && (
+            disabled) when the teacher has turned off the AI tutor, globally or for this classroom. */}
+        {aiAvailable && (
           <div className="lg:col-span-4 h-[560px] lg:h-full min-h-[500px]">
             <GeminiTutor
               system={system}

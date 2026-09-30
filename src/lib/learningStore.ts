@@ -150,6 +150,15 @@ export interface TeacherSettings {
   enableHints: boolean;
   enableXp: boolean;
   enableBadges: boolean;
+  // Research-report metadata (ข้อมูลรายงานการวิจัย), included in TeacherAnalytics' JSON export.
+  // Optional so settings saved before these existed still type-check; empty = not filled in.
+  researchTitle?: string;
+  researchAuthor?: string;
+  researchPosition?: string;
+  researchSchool?: string;
+  researchSubjectLevel?: string;
+  researchAcademicYear?: string;
+  researchNotes?: string;
 }
 
 export const CURRICULUM_LESSONS: Lesson[] = [
@@ -1321,7 +1330,14 @@ export const defaultTeacherSettings: TeacherSettings = {
   enableAiTutor: true,
   enableHints: true,
   enableXp: true,
-  enableBadges: true
+  enableBadges: true,
+  researchTitle: '',
+  researchAuthor: '',
+  researchPosition: '',
+  researchSchool: '',
+  researchSubjectLevel: '',
+  researchAcademicYear: '',
+  researchNotes: ''
 };
 
 export function loadStudentProgress(): StudentProgress {

@@ -17,13 +17,22 @@ import {
   Check,
   X,
   QrCode,
-  AlertTriangle
+  AlertTriangle,
+  FileText,
+  Trash2
 } from 'lucide-react';
 import { loadTeacherSettings, saveTeacherSettings, TeacherSettings } from '../lib/learningStore';
-import { getTeacherClassCode, setTeacherClassCode, clearTeacherClassCode } from '../lib/classroomSync';
-import type { ClassSummary, StudentRecord } from '../lib/classroomStore';
+import {
+  getTeacherClassCode,
+  setTeacherClassCode,
+  clearTeacherClassCode,
+  getPresentationClassCode,
+  setPresentationClassCode
+} from '../lib/classroomSync';
+import type { ClassSummary, ClassFlags, StudentRecord } from '../lib/classroomStore';
 import { StudentRosterRow } from '../components/StudentRosterRow';
 import { QRCodeModal } from '../components/QRCodeModal';
+import { RESEARCH_METADATA_FIELDS } from '../lib/reportExport';
 import { cn } from '../lib/utils';
 
 const FEATURE_TOGGLES: { key: keyof TeacherSettings; label: string }[] = [
@@ -44,6 +53,11 @@ export default function TeacherSettingsPage() {
   const [classesLoading, setClassesLoading] = useState(false);
   const [classesError, setClassesError] = useState<string | null>(null);
   const [togglingCode, setTogglingCode] = useState<string | null>(null);
+  // "<classCode>:<flag>" of the per-classroom switch currently being saved.
+  const [savingFlag, setSavingFlag] = useState<string | null>(null);
+  const [flagError, setFlagError] = useState<string | null>(null);
+  const [deletingCode, setDeletingCode] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Inline note editing — one row editable at a time.
   const [editingNoteFor, setEditingNoteFor] = useState<string | null>(null);
@@ -131,6 +145,24 @@ export default function TeacherSettingsPage() {
     }
   }
 
+  async function handleSetFlag(code: string, flag: keyof ClassFlags, value: boolean) {
+    setSavingFlag(`${code}:${flag}`);
+    setFlagError(null);
+    try {
+      const res = await fetch(`/api/classroom/${encodeURIComponent(code)}/flags`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [flag]: value })
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      await refreshAllClasses();
+    } catch {
+      setFlagError('ไม่สามารถบันทึกการตั้งค่าห้องเรียนได้ ลองใหม่อีกครั้ง');
+    } finally {
+      setSavingFlag(null);
+    }
+  }
+
   function handleStartEditNote(code: string, currentNote?: string) {
     setEditingNoteFor(code);
     setNoteDraft(currentNote || '');
@@ -174,6 +206,52 @@ export default function TeacherSettingsPage() {
     setExpandedCode(next);
     if (next && !rosterByCode[next]) {
       fetchRosterFor(next);
+    }
+  }
+
+  // Permanent delete (vs "ปิดห้อง", which is reversible). The student count in the confirmation is
+  // read fresh from the roster, not from the possibly-stale listing, so a teacher tidying up test
+  // rooms can't wipe a real class's data by mistake.
+  async function handleDeleteClass(code: string) {
+    setDeletingCode(code);
+    setDeleteError(null);
+    try {
+      const rosterRes = await fetch(`/api/classroom/${encodeURIComponent(code)}/roster`);
+      if (rosterRes.status === 404) {
+        await refreshAllClasses(); // already gone
+        return;
+      }
+      if (!rosterRes.ok) throw new Error(String(rosterRes.status));
+      const studentCount = (((await rosterRes.json()).students as StudentRecord[]) || []).length;
+      const message =
+        studentCount > 0
+          ? `ลบห้องเรียน ${code} ถาวร?
+
+ห้องนี้มีนักเรียน ${studentCount} คน ข้อมูลความก้าวหน้าของนักเรียนทั้งหมดจะถูกลบถาวร กู้คืนไม่ได้ ยืนยันหรือไม่?
+
+(ถ้าเพียงไม่ต้องการให้นักเรียนเข้าห้องนี้อีก ใช้ "ปิดห้อง" แทน — เปิดคืนได้ภายหลัง)`
+          : `ลบห้องเรียน ${code} ถาวร? (ห้องนี้ยังไม่มีนักเรียน) ยืนยันหรือไม่?`;
+      if (!window.confirm(message)) return;
+
+      const res = await fetch(`/api/classroom/${encodeURIComponent(code)}`, { method: 'DELETE' });
+      if (!res.ok && res.status !== 404) throw new Error(String(res.status));
+      // Don't leave this browser pointing at a room that no longer exists.
+      if (getTeacherClassCode() === code) {
+        clearTeacherClassCode();
+        setClassCode(null);
+      }
+      if (getPresentationClassCode() === code) setPresentationClassCode(null);
+      if (expandedCode === code) setExpandedCode(null);
+      setRosterByCode((prev) => {
+        const next = { ...prev };
+        delete next[code];
+        return next;
+      });
+      await refreshAllClasses();
+    } catch {
+      setDeleteError('ไม่สามารถลบห้องเรียนได้ ลองใหม่อีกครั้ง');
+    } finally {
+      setDeletingCode(null);
     }
   }
 
@@ -286,6 +364,8 @@ export default function TeacherSettingsPage() {
         </div>
 
         {classesError && <p className="text-xs font-bold text-rose-600">{classesError}</p>}
+        {flagError && <p className="text-xs font-bold text-rose-600">{flagError}</p>}
+        {deleteError && <p className="text-xs font-bold text-rose-600">{deleteError}</p>}
 
         {allClasses && allClasses.length === 0 && !classesError && (
           <p className="text-xs text-slate-500 leading-relaxed">
@@ -391,7 +471,56 @@ export default function TeacherSettingsPage() {
                         )}
                         {cls.active ? 'ปิดห้อง' : 'เปิดห้องอีกครั้ง'}
                       </button>
+                      {/* Destructive + permanent: solid red with a trash icon, unlike the tinted,
+                          reversible "ปิดห้อง" next to it. Confirms (with the student count) first. */}
+                      <button
+                        onClick={() => handleDeleteClass(cls.classCode)}
+                        disabled={deletingCode === cls.classCode}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-rose-700 bg-rose-600 text-white text-[11px] font-bold hover:bg-rose-700 transition-colors disabled:opacity-60"
+                      >
+                        {deletingCode === cls.classCode ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3 h-3" />
+                        )}
+                        ลบห้องเรียน
+                      </button>
                     </div>
+                  </div>
+
+                  {/* Per-classroom switches. AI is shown to students only when BOTH this and the
+                      global "Gemini AI Tutor" toggle below are on; the server enforces it too. */}
+                  <div className="flex flex-wrap gap-2 px-3 pb-3">
+                    {(
+                      [
+                        { flag: 'aiEnabled', label: 'เปิดใช้ AI', value: cls.aiEnabled },
+                        { flag: 'includeInResearch', label: 'นับรวมในสถิติวิจัย', value: cls.includeInResearch }
+                      ] as const
+                    ).map(({ flag, label, value }) => (
+                      <button
+                        key={flag}
+                        type="button"
+                        role="switch"
+                        aria-checked={value}
+                        onClick={() => handleSetFlag(cls.classCode, flag, !value)}
+                        disabled={savingFlag === `${cls.classCode}:${flag}`}
+                        className={cn(
+                          'inline-flex items-center gap-1.5 px-2.5 py-1 min-h-11 sm:min-h-0 rounded-lg border text-xs sm:text-[11px] font-bold transition-colors disabled:opacity-60',
+                          value
+                            ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
+                            : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'
+                        )}
+                      >
+                        {savingFlag === `${cls.classCode}:${flag}` ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : value ? (
+                          <ToggleRight className="w-4 h-4" />
+                        ) : (
+                          <ToggleLeft className="w-4 h-4" />
+                        )}
+                        {label}: {value ? 'เปิด' : 'ปิด'}
+                      </button>
+                    ))}
                   </div>
 
                   {isExpanded && (
@@ -458,6 +587,47 @@ export default function TeacherSettingsPage() {
                   {val ? <ToggleRight className="w-7 h-7" /> : <ToggleLeft className="w-7 h-7" />}
                 </button>
               </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Research-report metadata — saved in this browser only (like the settings above) and
+          included in TeacherAnalytics' "ส่งออกข้อมูลรายงาน" JSON; empty fields are left out. */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+        <div className="space-y-1">
+          <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+            <FileText className="w-5 h-5 text-indigo-600" /> ข้อมูลรายงานการวิจัย
+          </h3>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            ไม่บังคับกรอก — ข้อมูลที่กรอกจะถูกแนบไปกับไฟล์ "ส่งออกข้อมูลรายงาน" ในหน้าวิเคราะห์ผลการเรียน
+            (บันทึกไว้ในเบราว์เซอร์นี้เท่านั้น)
+          </p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {RESEARCH_METADATA_FIELDS.map((field) => {
+            const isNotes = field.settingsKey === 'researchNotes';
+            const inputClass =
+              'w-full px-3 py-2 border border-slate-200 rounded-xl text-base sm:text-sm focus:outline-none focus:border-indigo-400';
+            return (
+              <label key={field.settingsKey} className={cn('space-y-1 block', isNotes && 'sm:col-span-2')}>
+                <span className="text-xs font-bold text-slate-700">{field.label}</span>
+                {isNotes ? (
+                  <textarea
+                    rows={4}
+                    value={settings[field.settingsKey] || ''}
+                    onChange={(e) => updateSettings({ [field.settingsKey]: e.target.value } as Partial<TeacherSettings>)}
+                    className={cn(inputClass, 'resize-y')}
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={settings[field.settingsKey] || ''}
+                    onChange={(e) => updateSettings({ [field.settingsKey]: e.target.value } as Partial<TeacherSettings>)}
+                    className={inputClass}
+                  />
+                )}
+              </label>
             );
           })}
         </div>

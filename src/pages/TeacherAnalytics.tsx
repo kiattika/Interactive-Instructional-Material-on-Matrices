@@ -1,12 +1,15 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { BarChart, Users, AlertTriangle, RefreshCw, Info, Link as LinkIcon } from 'lucide-react';
+import { BarChart, Users, AlertTriangle, RefreshCw, Info, Link as LinkIcon, Download } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { loadTeacherSettings, TeacherSettings } from '../lib/learningStore';
-import type { StudentRecord, ClassSummary } from '../lib/classroomStore';
+import { isClassIncludedInResearch, StudentRecord, ClassSummary } from '../lib/classroomStore';
 import { StudentRosterRow } from '../components/StudentRosterRow';
 import { SurveyResultsPanel } from '../components/SurveyResultsPanel';
 import { EfficiencyStatsPanel } from '../components/EfficiencyStatsPanel';
-import { computeEfficiencyStats } from '../lib/efficiencyStats';
+import { computeResearchEfficiencyStats, ClassroomEfficiencyInput } from '../lib/efficiencyStats';
+import { fetchSurveyResults } from '../lib/surveyClient';
+import type { SurveyAggregate } from '../lib/surveyStore';
+import { buildReportData, buildResearchMetadata, reportFileName, downloadJsonFile } from '../lib/reportExport';
 import { cn } from '../lib/utils';
 
 export default function TeacherAnalytics() {
@@ -71,9 +74,10 @@ export default function TeacherAnalytics() {
     if (classCode) refreshRoster(classCode);
   }, [classCode]);
 
-  // Every student across every classroom, for the "all classrooms" E1/E2/E.I. view — fetched via
-  // the same per-class roster endpoint (one request per class). Only the latest fetch may land.
-  const [allStudents, setAllStudents] = useState<StudentRecord[] | null>(null);
+  // Every research classroom's students, for the "all classrooms" E1/E2/E.I. view — fetched via
+  // the same per-class roster endpoint (one request per class). Classrooms marked
+  // includeInResearch=false are never fetched here. Only the latest fetch may land.
+  const [allStudents, setAllStudents] = useState<ClassroomEfficiencyInput[] | null>(null);
   const [allStudentsError, setAllStudentsError] = useState<string | null>(null);
   const allStudentsRequest = useRef(0);
 
@@ -83,33 +87,101 @@ export default function TeacherAnalytics() {
     setAllStudents(null);
     setAllStudentsError(null);
     Promise.all(
-      allClasses.map(async (cls) => {
+      allClasses.filter(isClassIncludedInResearch).map(async (cls): Promise<ClassroomEfficiencyInput> => {
         const res = await fetch(`/api/classroom/${encodeURIComponent(cls.classCode)}/roster`);
-        if (res.status === 404) return [] as StudentRecord[];
+        if (res.status === 404) return { includeInResearch: cls.includeInResearch, students: [] };
         if (!res.ok) throw new Error(`roster ${cls.classCode}`);
-        return ((await res.json()).students as StudentRecord[]) || [];
+        const students = ((await res.json()).students as StudentRecord[]) || [];
+        return { includeInResearch: cls.includeInResearch, students: students.map((s) => s.progress) };
       })
     )
-      .then((rosters) => {
-        if (requestId === allStudentsRequest.current) setAllStudents(rosters.flat());
+      .then((classrooms) => {
+        if (requestId === allStudentsRequest.current) setAllStudents(classrooms);
       })
       .catch(() => {
         if (requestId === allStudentsRequest.current) setAllStudentsError('ไม่สามารถดึงข้อมูลนักเรียนทุกห้องได้ ลองรีเฟรชอีกครั้ง');
       });
   }, [showAllClasses, allClasses]);
 
-  const scopeStudents = showAllClasses ? allStudents : roster;
-  const efficiencyStats = useMemo(
-    () => (scopeStudents ? computeEfficiencyStats(scopeStudents.map((s) => s.progress)) : null),
-    [scopeStudents]
-  );
-
   const currentClass = allClasses?.find((c) => c.classCode === classCode) || null;
+  // A single selected classroom the teacher excluded from the research shows no research figures
+  // at all (E1/E2/E.I. or survey) — a notice replaces them.
+  const currentClassExcluded = !showAllClasses && !!currentClass && !isClassIncludedInResearch(currentClass);
+  const excludedClassCount = allClasses ? allClasses.filter((c) => !isClassIncludedInResearch(c)).length : 0;
+
+  const efficiencyStats = useMemo(() => {
+    if (showAllClasses) return allStudents ? computeResearchEfficiencyStats(allStudents) : null;
+    if (!roster || !currentClass) return null;
+    return computeResearchEfficiencyStats([
+      { includeInResearch: currentClass.includeInResearch, students: roster.map((s) => s.progress) }
+    ]);
+  }, [showAllClasses, allStudents, roster, currentClass]);
+
+  // Export Report Data: always fetches fresh rosters + survey aggregates for EVERY classroom
+  // (independent of the selector scope above), and refuses to write a partial file — a research
+  // report silently missing a classroom would be worse than no file.
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  async function handleExportReport() {
+    if (!allClasses || allClasses.length === 0) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const [rosters, surveyAll, surveys] = await Promise.all([
+        Promise.all(
+          allClasses.map(async (cls) => {
+            const res = await fetch(`/api/classroom/${encodeURIComponent(cls.classCode)}/roster`);
+            if (res.status === 404) return [] as StudentRecord[];
+            if (!res.ok) throw new Error(`roster ${cls.classCode}`);
+            return ((await res.json()).students as StudentRecord[]) || [];
+          })
+        ),
+        // The server's all-classrooms aggregate already leaves out non-research classrooms.
+        fetchSurveyResults(null),
+        Promise.all(
+          allClasses.map((cls) =>
+            isClassIncludedInResearch(cls) ? fetchSurveyResults(cls.classCode) : Promise.resolve(null)
+          )
+        )
+      ]);
+      if (!surveyAll || surveys.some((sv, i) => !sv && isClassIncludedInResearch(allClasses[i]))) {
+        throw new Error('survey');
+      }
+      const rostersByClass: Record<string, StudentRecord[]> = {};
+      const surveyByClass: Record<string, SurveyAggregate> = {};
+      allClasses.forEach((cls, i) => {
+        rostersByClass[cls.classCode] = rosters[i];
+        const survey = surveys[i];
+        if (survey) surveyByClass[cls.classCode] = survey;
+      });
+      const now = new Date();
+      downloadJsonFile(
+        reportFileName(now),
+        buildReportData({
+          classes: allClasses,
+          rostersByClass,
+          surveyAll,
+          surveyByClass,
+          // Read fresh: the teacher may have edited Settings since this page mounted.
+          metadata: buildResearchMetadata(loadTeacherSettings()),
+          generatedAt: now
+        })
+      );
+    } catch {
+      setExportError('ไม่สามารถดึงข้อมูลครบทุกห้องเรียนเพื่อส่งออกได้ ลองใหม่อีกครั้ง');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   // Scope for the aggregate panels: null = every classroom combined.
   const aggregateClassCode = showAllClasses ? null : classCode;
   const aggregateScopeLabel =
     aggregateClassCode === null
-      ? 'ภาพรวมผู้เรียนทุกห้องเรียน'
+      ? excludedClassCount > 0
+        ? `ภาพรวมผู้เรียนทุกห้องเรียน (ไม่รวม ${excludedClassCount} ห้องที่ไม่นับในสถิติวิจัย)`
+        : 'ภาพรวมผู้เรียนทุกห้องเรียน'
       : `ห้อง ${aggregateClassCode}${currentClass?.note ? ` (${currentClass.note})` : ''}`;
 
   return (
@@ -160,12 +232,32 @@ export default function TeacherAnalytics() {
               >
                 {cls.classCode}
                 {cls.note ? ` — ${cls.note}` : ''} ({cls.studentCount} คน)
+                {!isClassIncludedInResearch(cls) && ' · ไม่นับในสถิติวิจัย'}
               </button>
             ))}
           </div>
         </div>
       )}
       {classesError && <p className="text-xs font-bold text-rose-600">{classesError}</p>}
+
+      {/* Export Report Data — one JSON file (E1/E2/E.I., survey aggregates, roster counts),
+          aggregate and per-classroom, for an external research report. */}
+      {allClasses && allClasses.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-slate-500 leading-relaxed">
+            ไฟล์ JSON รวม E1/E2/E.I. ผลแบบประเมินความพึงพอใจ และจำนวนนักเรียน — ทั้งภาพรวมและรายห้องเรียน
+          </p>
+          <button
+            onClick={handleExportReport}
+            disabled={exporting}
+            className="inline-flex items-center gap-1.5 px-3 py-2 min-h-11 sm:min-h-0 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            <Download className={cn('w-4 h-4', exporting && 'animate-pulse')} />
+            {exporting ? 'กำลังเตรียมไฟล์...' : 'ส่งออกข้อมูลรายงาน (Export Report Data)'}
+          </button>
+          {exportError && <p className="w-full text-xs font-bold text-rose-600">{exportError}</p>}
+        </div>
+      )}
 
       {/* Class Overview Stats — settings-derived + a real roster count once a class exists */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -190,8 +282,20 @@ export default function TeacherAnalytics() {
         </div>
       </div>
 
+      {/* A classroom excluded from the research gets no research figures at all (E1/E2/E.I. and
+          the survey below) — see ClassRecord.includeInResearch. */}
+      {currentClassExcluded && (
+        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex items-start gap-3">
+          <Info className="w-5 h-5 text-slate-500 flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-slate-600 leading-relaxed">
+            <strong>{aggregateScopeLabel}</strong> ถูกตั้งค่าไม่ให้นับรวมในสถิติวิจัย จึงไม่แสดงค่า E1/E2/E.I.
+            และผลแบบประเมินความพึงพอใจของห้องนี้ และไม่นำไปรวมในภาพรวมหรือไฟล์ส่งออกรายงาน — เปลี่ยนได้ที่หน้าตั้งค่าชั้นเรียน
+          </p>
+        </div>
+      )}
+
       {/* E1 / E2 / E.I. — follows the classroom selector above (one class, or all combined). */}
-      {(classCode || showAllClasses) && (
+      {(classCode || showAllClasses) && !currentClassExcluded && (
         <EfficiencyStatsPanel
           stats={efficiencyStats}
           scopeLabel={aggregateScopeLabel}
@@ -275,7 +379,7 @@ export default function TeacherAnalytics() {
       </div>
 
       {/* Anonymous post-course satisfaction survey — aggregates only (see lib/surveyStore.ts). */}
-      <SurveyResultsPanel classCode={aggregateClassCode} scopeLabel={aggregateScopeLabel} />
+      {!currentClassExcluded && <SurveyResultsPanel classCode={aggregateClassCode} scopeLabel={aggregateScopeLabel} />}
     </div>
   );
 }

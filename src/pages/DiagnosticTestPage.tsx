@@ -78,6 +78,9 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
   const [aiTopic, setAiTopic] = useState<TopicKey | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiProblemText, setAiProblemText] = useState('');
+  // The joined classroom's AI switch (ClassRecord.aiEnabled): the practice-problem button is
+  // hidden rather than left to fail with the server's 403 message.
+  const classroomAiEnabled = getClassroomLink()?.aiEnabled !== false;
 
   const handleGeneratePractice = async (topic: TopicKey) => {
     setAiTopic(topic);
@@ -334,18 +337,20 @@ export function DiagnosticTestPage({ mode }: DiagnosticTestPageProps) {
                           <div>
                             <strong>{TOPIC_LABELS[key]}:</strong> {TOPIC_ADVICE[key]}
                           </div>
-                          <button
-                            onClick={() => handleGeneratePractice(key)}
-                            disabled={aiLoading && aiTopic === key}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-11 sm:min-h-0 bg-white border border-amber-300 text-amber-800 rounded-lg text-xs sm:text-[11px] font-bold hover:bg-amber-100 transition-colors disabled:opacity-60"
-                          >
-                            {aiLoading && aiTopic === key ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <Wand2 className="w-3.5 h-3.5" />
-                            )}
-                            ขอโจทย์ฝึกเพิ่มเติมจาก AI
-                          </button>
+                          {classroomAiEnabled && (
+                            <button
+                              onClick={() => handleGeneratePractice(key)}
+                              disabled={aiLoading && aiTopic === key}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-11 sm:min-h-0 bg-white border border-amber-300 text-amber-800 rounded-lg text-xs sm:text-[11px] font-bold hover:bg-amber-100 transition-colors disabled:opacity-60"
+                            >
+                              {aiLoading && aiTopic === key ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Wand2 className="w-3.5 h-3.5" />
+                              )}
+                              ขอโจทย์ฝึกเพิ่มเติมจาก AI
+                            </button>
+                          )}
                           {aiTopic === key && (aiLoading || aiProblemText) && (
                             <div className="bg-white border border-amber-200 rounded-xl p-3 text-slate-700 text-xs leading-relaxed">
                               {aiLoading ? (
